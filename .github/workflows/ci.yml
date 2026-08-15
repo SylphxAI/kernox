@@ -60,7 +60,7 @@ jobs:
         id: predecessor
         shell: bash
         run: |
-          status="$(curl --retry 3 --silent --show-error --output /dev/null --write-out '%{http_code}' https://crates.io/api/v1/crates/kernox)"
+          status="$(curl --retry 3 --silent --show-error --user-agent 'kernox-ci/1.0 (+https://github.com/SylphxAI/kernox)' --output /dev/null --write-out '%{http_code}' https://index.crates.io/ke/rn/kernox)"
           case "${status}" in
             200) echo "exists=true" >> "${GITHUB_OUTPUT}" ;;
             404) echo "exists=false" >> "${GITHUB_OUTPUT}" ;;
