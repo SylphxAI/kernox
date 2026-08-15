@@ -56,11 +56,25 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Detect published predecessor
+        id: predecessor
+        shell: bash
+        run: |
+          status="$(curl --retry 3 --silent --show-error --output /dev/null --write-out '%{http_code}' https://crates.io/api/v1/crates/kernox)"
+          case "${status}" in
+            200) echo "exists=true" >> "${GITHUB_OUTPUT}" ;;
+            404) echo "exists=false" >> "${GITHUB_OUTPUT}" ;;
+            *) echo "unexpected crates.io status ${status}" >&2; exit 1 ;;
+          esac
       - name: Compare against published predecessors when present
+        if: steps.predecessor.outputs.exists == 'true'
         uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
         with:
           package: kernox-core,kernox-runtime,kernox-host-serverless,kernox-host-tokio,kernox-testkit,kernox
           rust-toolchain: 1.97.1
+      - name: Record first-release baseline state
+        if: steps.predecessor.outputs.exists == 'false'
+        run: echo 'No published kernox predecessor exists; compatibility starts at this release.'
 
   portability:
     name: ${{ matrix.os }}
