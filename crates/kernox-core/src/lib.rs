@@ -22,3 +22,10 @@ pub use id::{CapabilityId, PluginId};
 
 /// Schema version emitted by [`GraphReport`].
 pub const GRAPH_REPORT_SCHEMA_VERSION: u32 = 1;
+
+/// Absolute plugin count ceiling accepted by the resolver.
+pub const ABSOLUTE_MAX_PLUGINS: usize = 65_536;
+/// Absolute per-plugin capability declaration ceiling.
+pub const ABSOLUTE_MAX_CAPABILITIES_PER_PLUGIN: usize = 4_096;
+/// Absolute resolved edge ceiling.
+pub const ABSOLUTE_MAX_EDGES: usize = 1_048_576;

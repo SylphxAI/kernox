@@ -147,6 +147,16 @@ pub enum ResolveError {
         /// Supported schema version.
         supported: u32,
     },
+    /// A caller attempted to raise a resource limit beyond Kernox's hard bound.
+    #[error("configured {limit} limit {actual} exceeds absolute maximum {maximum}")]
+    ConfiguredLimitExceeded {
+        /// Stable limit name.
+        limit: &'static str,
+        /// Requested limit.
+        actual: usize,
+        /// Absolute accepted maximum.
+        maximum: usize,
+    },
     /// More plugins were supplied than the configured graph limit.
     #[error("plugin count {actual} exceeds configured maximum {maximum}")]
     PluginLimitExceeded {
@@ -305,6 +315,7 @@ impl ResolveError {
     pub const fn tag(&self) -> &'static str {
         match self {
             Self::UnsupportedSchemaVersion { .. } => "graph.unsupported-schema-version",
+            Self::ConfiguredLimitExceeded { .. } => "graph.configured-limit-exceeded",
             Self::PluginLimitExceeded { .. } => "graph.plugin-limit",
             Self::CapabilityLimitExceeded { .. } => "graph.capability-limit",
             Self::EdgeLimitExceeded { .. } => "graph.edge-limit",

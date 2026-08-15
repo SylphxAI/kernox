@@ -1,10 +1,14 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/kernox",
+    "crates/cargo-kernox",
     "crates/kernox-core",
     "crates/kernox-host-serverless",
     "crates/kernox-host-tokio",
     "crates/kernox-runtime",
+    "crates/kernox-testkit",
+    "examples/order-app",
 ]
 
 [workspace.package]
@@ -19,11 +23,13 @@ keywords = ["architecture", "dependency-injection", "kernel", "plugin", "runtime
 categories = ["asynchronous", "config", "development-tools"]
 
 [workspace.dependencies]
+clap = { version = "4.6.6", features = ["derive"] }
 futures = "0.3.34"
 kernox-core = { path = "crates/kernox-core", version = "1.0.0" }
 proptest = "1.11.0"
 semver = { version = "1.0.28", default-features = false, features = ["std"] }
 serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", default-features = false }
 tokio-util = { version = "0.7.19", default-features = false }

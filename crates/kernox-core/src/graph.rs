@@ -3,8 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use semver::Version;
 
 use crate::{
-    Binding, CapabilityId, CapabilityRequirement, GRAPH_REPORT_SCHEMA_VERSION, PluginDescriptor,
-    PluginId, RequirementCardinality, ResolveError,
+    ABSOLUTE_MAX_CAPABILITIES_PER_PLUGIN, ABSOLUTE_MAX_EDGES, ABSOLUTE_MAX_PLUGINS, Binding,
+    CapabilityId, CapabilityRequirement, GRAPH_REPORT_SCHEMA_VERSION, PluginDescriptor, PluginId,
+    RequirementCardinality, ResolveError,
 };
 
 /// Resource limits applied during graph resolution.
@@ -232,7 +233,7 @@ struct ProviderCandidate {
 
 fn resolve(spec: CompositionSpec) -> Result<ResolvedGraph, ResolveError> {
     validate_schema_version(spec.schema_version)?;
-
+    validate_configured_limits(spec.limits)?;
     validate_plugin_limit(spec.plugins.len(), spec.limits.max_plugins)?;
 
     let mut plugins = BTreeMap::new();
@@ -340,6 +341,23 @@ fn resolve(spec: CompositionSpec) -> Result<ResolvedGraph, ResolveError> {
     let startup_order = topological_order(plugins.keys(), &edges)?;
 
     Ok(ResolvedGraph { plugins, requirements: resolved_requirements, edges, startup_order })
+}
+
+fn validate_configured_limits(limits: GraphLimits) -> Result<(), ResolveError> {
+    for (limit, actual, maximum) in [
+        ("plugins", limits.max_plugins, ABSOLUTE_MAX_PLUGINS),
+        (
+            "capabilities-per-plugin",
+            limits.max_capabilities_per_plugin,
+            ABSOLUTE_MAX_CAPABILITIES_PER_PLUGIN,
+        ),
+        ("edges", limits.max_edges, ABSOLUTE_MAX_EDGES),
+    ] {
+        if actual > maximum {
+            return Err(ResolveError::ConfiguredLimitExceeded { limit, actual, maximum });
+        }
+    }
+    Ok(())
 }
 
 fn validate_schema_version(actual: u32) -> Result<(), ResolveError> {
@@ -695,6 +713,17 @@ mod tests {
         let error = GraphBuilder::from_spec(spec).resolve().unwrap_err();
 
         assert_eq!(error.tag(), "graph.unsupported-schema-version");
+    }
+
+    #[test]
+    fn rejects_attempts_to_raise_absolute_resource_limits() {
+        let spec = CompositionSpec {
+            limits: GraphLimits { max_plugins: ABSOLUTE_MAX_PLUGINS + 1, ..GraphLimits::default() },
+            ..CompositionSpec::default()
+        };
+        let error = GraphBuilder::from_spec(spec).resolve().unwrap_err();
+
+        assert_eq!(error.tag(), "graph.configured-limit-exceeded");
     }
 
     #[cfg(feature = "serde")]
