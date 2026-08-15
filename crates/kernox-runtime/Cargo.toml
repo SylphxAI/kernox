@@ -1,0 +1,23 @@
+[package]
+name = "kernox-runtime"
+description = "Typed provisioning and transactional lifecycle runtime for Kernox"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+kernox-core.workspace = true
+semver.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+futures.workspace = true
+
+[lints]
+workspace = true

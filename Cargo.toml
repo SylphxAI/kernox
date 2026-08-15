@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/kernox-core"]
+members = ["crates/kernox-core", "crates/kernox-runtime"]
 
 [workspace.package]
 version = "1.0.0"
@@ -14,6 +14,8 @@ keywords = ["architecture", "dependency-injection", "kernel", "plugin", "runtime
 categories = ["asynchronous", "config", "development-tools"]
 
 [workspace.dependencies]
+futures = "0.3.34"
+kernox-core = { path = "crates/kernox-core", version = "1.0.0" }
 proptest = "1.11.0"
 semver = { version = "1.0.28", default-features = false, features = ["std"] }
 serde = { version = "1.0.229", features = ["derive"] }
