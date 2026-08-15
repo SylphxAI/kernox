@@ -1,6 +1,11 @@
 [workspace]
 resolver = "3"
-members = ["crates/kernox-core", "crates/kernox-runtime"]
+members = [
+    "crates/kernox-core",
+    "crates/kernox-host-serverless",
+    "crates/kernox-host-tokio",
+    "crates/kernox-runtime",
+]
 
 [workspace.package]
 version = "1.0.0"
@@ -20,6 +25,8 @@ proptest = "1.11.0"
 semver = { version = "1.0.28", default-features = false, features = ["std"] }
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.20"
+tokio = { version = "1.53.1", default-features = false }
+tokio-util = { version = "0.7.19", default-features = false }
 
 [workspace.lints.rust]
 missing_docs = "warn"
