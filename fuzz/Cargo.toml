@@ -1,0 +1,20 @@
+[package]
+name = "kernox-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+kernox-core = { path = "../crates/kernox-core", features = ["serde"] }
+libfuzzer-sys = "0.4.13"
+serde_json = "1.0.151"
+
+[[bin]]
+name = "graph_json"
+path = "fuzz_targets/graph_json.rs"
+test = false
+doc = false
+bench = false

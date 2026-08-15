@@ -1,0 +1,20 @@
+[package]
+name = "kernox-example-order-app"
+description = "Host-neutral three-plugin reference application for Kernox"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+kernox = { path = "../../crates/kernox", version = "1.0.0", features = ["full"] }
+semver.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

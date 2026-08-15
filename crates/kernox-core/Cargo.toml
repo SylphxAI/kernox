@@ -1,0 +1,29 @@
+[package]
+name = "kernox-core"
+description = "Deterministic capability graph and contracts for the Kernox application kernel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+default = []
+serde = ["dep:serde", "semver/serde"]
+
+[dependencies]
+semver.workspace = true
+serde = { workspace = true, optional = true }
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+serde_json = "1.0.151"
+
+[lints]
+workspace = true

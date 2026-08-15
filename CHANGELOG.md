@@ -1,0 +1,22 @@
+# Changelog
+
+All notable changes are documented here. Kernox follows Semantic Versioning;
+descriptor/report schema compatibility is versioned separately where stated.
+
+## [Unreleased]
+
+### Added
+
+- Deterministic capability graph with versioned provider resolution, explicit
+  bindings, conflicts, cycle diagnostics, hard resource ceilings, and stable
+  reports.
+- Typed atomic provisioning, declared-only dependency access, transactional
+  lifecycle rollback, reverse idempotent shutdown, scopes, and privacy-safe
+  lifecycle observations.
+- Supervised Tokio tasks, provider-neutral warm serverless invocations,
+  inspection CLI, conformance testkit, fuzz target, benchmarks, and one
+  host-neutral three-plugin reference application.
+- Fail-closed task-panic supervision, bounded graph diagnostics, and
+  concurrency regressions for scope closure and long-lived child retention.
+
+[Unreleased]: https://github.com/SylphxAI/kernox/commits/main

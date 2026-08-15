@@ -1,0 +1,24 @@
+[package]
+name = "kernox-host-serverless"
+description = "Provider-neutral warm application and invocation isolation host for Kernox"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+kernox-core.workspace = true
+kernox-runtime = { path = "../kernox-runtime", version = "1.0.0" }
+thiserror.workspace = true
+
+[dev-dependencies]
+futures.workspace = true
+
+[lints]
+workspace = true
