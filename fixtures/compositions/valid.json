@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "limits": {
+    "max_plugins": 10,
+    "max_capabilities_per_plugin": 10,
+    "max_edges": 10
+  },
+  "plugins": [
+    {
+      "id": "dev.example.clock",
+      "version": "1.0.0",
+      "provides": [
+        {
+          "id": "dev.example.clock",
+          "version": "1.0.0"
+        }
+      ],
+      "requires": [],
+      "conflicts": []
+    },
+    {
+      "id": "dev.example.orders",
+      "version": "1.0.0",
+      "provides": [],
+      "requires": [
+        {
+          "id": "dev.example.clock",
+          "version": "^1.0",
+          "cardinality": "ExactlyOne"
+        }
+      ],
+      "conflicts": []
+    }
+  ],
+  "bindings": []
+}

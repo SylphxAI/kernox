@@ -15,8 +15,8 @@ pub use descriptor::{
 };
 pub use error::{DescriptorError, IdentifierError, ResolveError};
 pub use graph::{
-    CompositionSpec, GraphBuilder, GraphLimits, GraphReport, PluginSummary, ResolvedEdge,
-    ResolvedGraph, ResolvedRequirement,
+    CompositionSpec, GraphBuilder, GraphDiagnostic, GraphLimits, GraphReport, PluginSummary,
+    ResolvedEdge, ResolvedGraph, ResolvedRequirement,
 };
 pub use id::{CapabilityId, PluginId};
 

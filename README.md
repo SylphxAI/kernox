@@ -2,33 +2,101 @@
 
 **Compose products. Keep domains pure.**
 
-Kernox is a high-performance, graph-backed application kernel for Rust. It
-assembles statically selected plugins, validates their capability graph, injects
-typed dependencies, and orchestrates deterministic lifecycle transitions. Once
-the graph is resolved, application calls use direct Rust handles rather than
-traversing the graph or dispatching through an event bus.
+Kernox is a graph-backed application kernel for Rust. A product is a statically
+selected set of plugins. Each plugin declares versioned capabilities it offers
+and requires; Kernox validates the graph, injects typed handles, and owns
+deterministic startup, rollback, and shutdown.
 
-Kernox is being developed as an independent open-source product. It is not
-wired into any existing Sylphx product, and it does not provide HTTP, storage,
-identity, AI, billing, or other business capabilities.
+The graph is the control plane, not the request path. After boot, domain code
+calls an ordinary `Arc<dyn Trait>` directly—no graph traversal, serialization,
+event bus, or service-locator lookup per call. The absolute point-estimate delta
+against direct composition is 0.14% on the recorded baseline, with overlapping
+confidence intervals.
 
-## Product contract
+```text
+product = Host + selected Plugins + explicit Bindings
 
-- [Project identity](PROJECT.md)
+build/start: descriptors -> capability DAG -> validate -> initialize -> ready
+hot path:    domain code  -> direct typed handle -> provider
+shutdown:    quiesce -> stop -> dispose in reverse dependency order
+```
+
+## What Kernox gives you
+
+- deterministic provider selection, explicit ambiguity resolution, conflicts,
+  semantic versions, optional/multi requirements, cycles, non-fatal graph
+  diagnostics, and hard graph bounds;
+- typed atomic provisioning with declared-only access and no global resolver;
+- rollback that keeps the primary failure and every cleanup failure;
+- reverse-order idempotent shutdown and privacy-safe lifecycle observations;
+- supervised Tokio tasks with cancellation, panic fail-closed reporting,
+  bounded drain, leak naming, and forced abort after the declared budget;
+- provider-neutral warm serverless apps with a fresh scope per invocation;
+- `cargo kernox` graph validation/rendering and a deterministic testkit; and
+- dual licensing, locked verification, advisory/license/source policy, fuzzing,
+  benchmarks, MSRV checks, cross-platform CI, and trusted-publishing automation.
+
+Kernox deliberately does not provide HTTP, storage, identity, AI, billing, an
+ORM, a generic event bus, or business policy. Those are plugins or external
+services. Native plugins are trusted in-process Rust code, not a sandbox.
+
+## Crates
+
+| Package | Role |
+| --- | --- |
+| `kernox` | Facade with opt-in `tokio` and `serverless` features |
+| `kernox-core` | Pure deterministic graph and schema contracts |
+| `kernox-runtime` | Typed provisions, lifecycle, scopes, observations |
+| `kernox-host-tokio` | Named supervised task capability |
+| `kernox-host-serverless` | Warm app and fresh invocation host |
+| `kernox-testkit` | Duration-free recorder and lifecycle failure probes |
+| `cargo-kernox` | Bounded JSON validation and JSON/DOT graph inspection |
+
+The [order reference application](examples/order-app) composes three unchanged
+domain plugins under both long-lived and serverless hosts.
+
+## Try the source candidate
+
+```bash
+cargo run -p kernox-example-order-app --bin long_lived
+cargo run -p kernox-example-order-app --bin serverless
+cargo run -p cargo-kernox -- kernox check fixtures/compositions/valid.json
+cargo run -p cargo-kernox -- kernox graph fixtures/compositions/valid.json --format dot
+```
+
+The repository commit build is:
+
+```bash
+cargo run --locked -p xtask -- verify
+```
+
+It runs formatting, all-target checks, Clippy, tests, rustdoc, the runtime-free
+core boundary, both product paths, dependency policy, RustSec audit, and the
+independently packageable core artifact. Fuzz, mutation, and benchmark
+distributions have separate extended lanes.
+
+## Design and operating contract
+
+- [Product identity and North Star](PROJECT.md)
 - [Product requirements](docs/prd.md)
-- [Critical path](docs/critical-path.md)
-- [Architecture decision](docs/adr/20260815T185400Z-static-capability-graph.md)
-- [Runtime contract](docs/specs/20260815T185400Z-runtime-contract.md)
-- [Acceptance matrix](docs/specs/20260815T185400Z-acceptance.md)
-- [Security](SECURITY.md)
+- [Critical path and redesign triggers](docs/critical-path.md)
+- [Static graph architecture ADR](docs/adr/20260815T185400Z-static-capability-graph.md)
+- [Runtime semantics](docs/specs/20260815T185400Z-runtime-contract.md)
+- [Production acceptance matrix](docs/specs/20260815T185400Z-acceptance.md)
+- [Plugin authoring](docs/plugin-authoring.md)
+- [Compatibility](docs/compatibility.md)
+- [Performance evidence](docs/performance.md)
+- [Threat model](docs/security/threat-model.md)
+- [Security reporting](SECURITY.md)
 
-## Status
+## Release state
 
-The repository and product contracts are established. Source, CI, package,
-release, and adoption states are reported independently; no production-readiness
-claim is implied by this document.
+Source correctness, pull-request CI, merge state, crates.io packages, and real
+product adoption are separate facts. Consult GitHub Actions/Releases and the
+crates.io package pages for those current states; this README does not turn a
+local or merged candidate into a published release.
 
 ## License
 
-Kernox is intended to be available under either Apache-2.0 or MIT, at your
-option. The complete license files are part of the release gate.
+Kernox is licensed under Apache-2.0 OR MIT, at your option. See
+[`LICENSE-APACHE`](LICENSE-APACHE) and [`LICENSE-MIT`](LICENSE-MIT).

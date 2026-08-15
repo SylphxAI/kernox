@@ -30,8 +30,9 @@ handles.
    reverse order and does not publish partial provisions.
 6. Lifecycle transition order is deterministic, invalid transitions fail, and
    shutdown is idempotent.
-7. Plugin-owned resources and tasks are bounded by an owning Scope. Removing or
-   stopping a plugin cannot leave Kernox-owned registrations active.
+7. Plugins close their own admission and resources through lifecycle hooks;
+   official Host supervisors bound app-wide tasks and report work that does not
+   drain. Statically removing a plugin removes its registrations entirely.
 8. Native static plugins are trusted in-process code, not a security sandbox.
 9. Hosts own the outer execution model. The kernel does not assume HTTP,
    Tokio, Lambda, a frame loop, a filesystem, or process shutdown.

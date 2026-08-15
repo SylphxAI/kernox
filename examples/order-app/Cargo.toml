@@ -11,7 +11,7 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
-kernox = { path = "../../crates/kernox", features = ["full"] }
+kernox = { path = "../../crates/kernox", version = "1.0.0", features = ["full"] }
 semver.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }

@@ -70,8 +70,14 @@ fn validate_source_field(
     value: &str,
     maximum: usize,
 ) -> Result<(), DescriptorError> {
-    if value.is_empty() {
+    if value.trim().is_empty() {
         return Err(DescriptorError::InvalidSource { field, reason: "must not be empty" });
+    }
+    if value.trim() != value {
+        return Err(DescriptorError::InvalidSource {
+            field,
+            reason: "must not have surrounding whitespace",
+        });
     }
     if value.len() > maximum {
         return Err(DescriptorError::InvalidSource { field, reason: "exceeds length bound" });
@@ -87,6 +93,7 @@ fn validate_source_field(
 
 /// A versioned capability made available by one plugin.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CapabilityOffer {
     id: CapabilityId,
@@ -144,6 +151,7 @@ impl RequirementCardinality {
 
 /// A versioned capability dependency declared by a plugin.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CapabilityRequirement {
     id: CapabilityId,
@@ -228,6 +236,7 @@ impl<'de> serde::Deserialize<'de> for PluginDescriptor {
         struct Wire {
             id: PluginId,
             version: Version,
+            #[serde(default)]
             source: Option<PluginSource>,
             #[serde(default)]
             provides: Vec<CapabilityOffer>,
@@ -363,6 +372,7 @@ impl PluginDescriptor {
 
 /// Explicit selection of one provider for one consumer capability requirement.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Binding {
     consumer: PluginId,
@@ -426,5 +436,21 @@ mod serde_tests {
 
         let error = serde_json::from_str::<PluginSource>(input).unwrap_err();
         assert!(error.to_string().contains("control characters"));
+        assert!(PluginSource::new("  ", None).is_err());
+        assert!(PluginSource::new("valid", Some(" https://example.com".to_owned())).is_err());
+    }
+
+    #[test]
+    fn nested_descriptor_contracts_reject_unknown_fields() {
+        let input = r#"{
+            "id": "dev.example.plugin",
+            "version": "1.0.0",
+            "provides": [
+                {"id": "dev.example.clock", "version": "1.0.0", "surprise": true}
+            ]
+        }"#;
+
+        let error = serde_json::from_str::<PluginDescriptor>(input).unwrap_err();
+        assert!(error.to_string().contains("unknown field"));
     }
 }

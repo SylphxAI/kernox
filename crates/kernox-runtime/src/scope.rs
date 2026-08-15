@@ -22,8 +22,6 @@ pub enum ScopeKind {
     Application,
     /// One serverless or request invocation.
     Invocation,
-    /// Host-defined nested unit of work.
-    Work,
 }
 
 /// Observable scope closure state.
@@ -92,8 +90,6 @@ impl Scope {
         let mut children =
             self.inner.children.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if self.state() != ScopeState::Open {
-            child.begin_close();
-            child.finish_close();
             return Err(ScopeError);
         }
         children.push(Arc::downgrade(&child.inner));
@@ -128,6 +124,13 @@ impl Scope {
             Self { inner: child }.finish_close();
         }
         self.inner.state.store(ScopeState::Closed as u8, Ordering::Release);
+        if let Some(parent) = self.inner.parent.as_ref().and_then(Weak::upgrade) {
+            parent
+                .children
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .retain(|child| child.upgrade().is_some_and(|child| child.id != self.inner.id));
+        }
     }
 }
 
@@ -174,5 +177,33 @@ const fn decode_state(value: u8) -> ScopeState {
         0 => ScopeState::Open,
         1 => ScopeState::Closing,
         _ => ScopeState::Closed,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closed_children_are_removed_from_a_long_lived_parent() -> Result<(), ScopeError> {
+        let application = Scope::application();
+        for _ in 0..10_000 {
+            let invocation = application.child(ScopeKind::Invocation)?;
+            invocation.begin_close();
+            invocation.finish_close();
+        }
+
+        let children =
+            application.inner.children.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(children.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn child_is_rejected_after_parent_close_begins() {
+        let application = Scope::application();
+        application.begin_close();
+
+        assert!(matches!(application.child(ScopeKind::Invocation), Err(ScopeError)));
     }
 }

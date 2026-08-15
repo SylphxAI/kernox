@@ -3,10 +3,12 @@
 use std::{
     collections::BTreeMap,
     fmt,
+    panic::AssertUnwindSafe,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
+use futures_util::FutureExt;
 use kernox_core::{CapabilityId, CapabilityOffer, DescriptorError, PluginDescriptor, PluginId};
 use kernox_runtime::{
     BoxFuture, Capability, InitializationContext, LifecycleContext, Plugin, PluginError,
@@ -109,6 +111,17 @@ pub struct PendingTask {
     pub name: TaskName,
 }
 
+/// A supervised task failure retained without exposing a panic payload.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TaskFailure {
+    /// Opaque supervisor-local identity.
+    pub id: TaskId,
+    /// Bounded operator-facing name.
+    pub name: TaskName,
+    /// Stable machine-readable failure tag.
+    pub error_tag: &'static str,
+}
+
 /// Object-safe task supervision contract consumed by Tokio-aware plugins.
 pub trait TokioTasks: Send + Sync + 'static {
     /// Spawns and tracks one task on the current Tokio runtime.
@@ -124,6 +137,12 @@ pub trait TokioTasks: Send + Sync + 'static {
 
     /// Returns a stable identity-ordered snapshot of unfinished tasks.
     fn pending_tasks(&self) -> Vec<PendingTask>;
+
+    /// Returns the first terminal task failure, when one occurred.
+    ///
+    /// A panic closes task admission and cancels the shared token. The panic
+    /// payload is deliberately not retained or exposed.
+    fn terminal_failure(&self) -> Option<TaskFailure>;
 }
 
 /// Resource and drain policy for [`TokioTaskPlugin`].
@@ -223,7 +242,21 @@ impl Plugin for TokioTaskPlugin {
                 return Ok(());
             };
             let pending = supervisor.drain().await;
-            if pending.is_empty() {
+            if let Some(failure) = supervisor.terminal_failure() {
+                let pending_suffix = if pending.is_empty() {
+                    String::new()
+                } else {
+                    format!("; {} peer task(s) also exceeded drain budget", pending.len())
+                };
+                Err(PluginError::new(
+                    failure.error_tag,
+                    format!(
+                        "{}:{} terminated unexpectedly{pending_suffix}",
+                        failure.id,
+                        failure.name.as_str()
+                    ),
+                ))
+            } else if pending.is_empty() {
                 Ok(())
             } else {
                 let names = pending
@@ -266,6 +299,7 @@ struct State {
     accepting: bool,
     next_id: u64,
     tasks: BTreeMap<TaskId, TaskRecord>,
+    terminal_failure: Option<TaskFailure>,
 }
 
 struct SupervisorInner {
@@ -291,6 +325,24 @@ impl Drop for TaskRegistration {
     }
 }
 
+impl TaskRegistration {
+    fn record_panic(&self) {
+        let mut state = self.inner.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.terminal_failure.is_none() {
+            let name = state
+                .tasks
+                .get(&self.id)
+                .map_or_else(|| TaskName("unknown-task".to_owned()), |record| record.name.clone());
+            state.terminal_failure =
+                Some(TaskFailure { id: self.id, name, error_tag: "tokio-task.panicked" });
+        }
+        state.accepting = false;
+        drop(state);
+        self.inner.tracker.close();
+        self.inner.cancellation.cancel();
+    }
+}
+
 struct TaskSupervisor {
     inner: Arc<SupervisorInner>,
 }
@@ -302,7 +354,12 @@ impl TaskSupervisor {
                 config,
                 cancellation: CancellationToken::new(),
                 tracker: TaskTracker::new(),
-                state: Mutex::new(State { accepting: true, next_id: 1, tasks: BTreeMap::new() }),
+                state: Mutex::new(State {
+                    accepting: true,
+                    next_id: 1,
+                    tasks: BTreeMap::new(),
+                    terminal_failure: None,
+                }),
             }),
         }
     }
@@ -359,8 +416,9 @@ impl TokioTasks for TaskSupervisor {
         let registration = TaskRegistration { inner: Arc::clone(&self.inner), id };
         let join = self.inner.tracker.spawn_on(
             async move {
-                let _registration = registration;
-                future.await;
+                if AssertUnwindSafe(future).catch_unwind().await.is_err() {
+                    registration.record_panic();
+                }
             },
             &handle,
         );
@@ -383,6 +441,15 @@ impl TokioTasks for TaskSupervisor {
             .iter()
             .map(|(id, record)| PendingTask { id: *id, name: record.name.clone() })
             .collect()
+    }
+
+    fn terminal_failure(&self) -> Option<TaskFailure> {
+        self.inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .terminal_failure
+            .clone()
     }
 }
 

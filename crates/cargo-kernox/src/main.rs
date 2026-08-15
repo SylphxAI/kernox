@@ -94,9 +94,10 @@ fn run(cli: Cli) -> Result<String, CliError> {
         Command::Check { spec } => {
             let report = load_and_resolve(&spec)?;
             Ok(format!(
-                "valid: {} plugin(s), {} edge(s), schema {}",
+                "valid: {} plugin(s), {} edge(s), {} diagnostic(s), schema {}",
                 report.plugins.len(),
                 report.edges.len(),
+                report.diagnostics.len(),
                 report.schema_version
             ))
         }

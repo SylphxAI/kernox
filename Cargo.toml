@@ -1,5 +1,6 @@
 [workspace]
 resolver = "3"
+exclude = ["fuzz"]
 members = [
     "crates/kernox",
     "crates/cargo-kernox",
@@ -9,6 +10,7 @@ members = [
     "crates/kernox-runtime",
     "crates/kernox-testkit",
     "examples/order-app",
+    "xtask",
 ]
 
 [workspace.package]
@@ -19,12 +21,15 @@ license = "MIT OR Apache-2.0"
 authors = ["Sylphx Limited"]
 repository = "https://github.com/SylphxAI/kernox"
 homepage = "https://github.com/SylphxAI/kernox"
+readme = "README.md"
 keywords = ["architecture", "dependency-injection", "kernel", "plugin", "runtime"]
 categories = ["asynchronous", "config", "development-tools"]
 
 [workspace.dependencies]
 clap = { version = "4.6.6", features = ["derive"] }
+criterion = "0.8.2"
 futures = "0.3.34"
+futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
 kernox-core = { path = "crates/kernox-core", version = "1.0.0" }
 proptest = "1.11.0"
 semver = { version = "1.0.28", default-features = false, features = ["std"] }

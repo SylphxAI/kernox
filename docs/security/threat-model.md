@@ -3,8 +3,9 @@
 ## Subject and evidence state
 
 Subject: Kernox native static composition, host SDKs, graph inspection format,
-build/release path, and the future isolated-extension seam. This document is a
-design contract until linked implementation tests exist. It intentionally omits
+build/release path, and the future isolated-extension seam. The native/static
+controls have executable evidence in this repository; future isolated-extension
+controls remain design requirements. This document intentionally omits
 exploit-operational details that do not improve public assurance.
 
 Intended users are Rust application and plugin authors. Native plugin code is
@@ -54,16 +55,16 @@ boundaries. A crate boundary alone is not isolation.
 | ID | Path and consequence | Designed control | Verification |
 | --- | --- | --- | --- |
 | T-01 | Malicious native Plugin reads memory, secrets, or performs arbitrary effects | Declare native Plugins trusted; no sandbox claim; use process/Wasm for untrusted code | Documentation negative review and isolated-extension acceptance tests when implemented |
-| T-02 | Descriptor spoofing or duplicate identity redirects a requirement | Validated stable IDs, versions, unique providers, explicit bindings, fail-closed ambiguity | Unit/property tests over collisions and binding permutations |
-| T-03 | Descriptor/type mismatch causes capability confusion | Typed `TypeId` plus declared identity/version validation before atomic publication | Negative provisioning tests and compile-fail fixtures |
-| T-04 | Resolver/service-locator escape grants undeclared ambient authority | Borrowed initialization resolver scoped to declared requirements; no global resolver API | Compile-fail and runtime undeclared-resolution tests |
-| T-05 | Partial initialization or cleanup failure leaves active resources | Transactional publication, reverse rollback, continued cleanup, composite failure report | Full transition failure-injection model |
-| T-06 | Plugin task ignores cancellation and prevents shutdown | Host task scope, bounded drain, leak report; forceful process policy remains Host-owned | Paused-time cancellation and leak fixtures |
-| T-07 | Pathological graph/report exhausts CPU or memory | Configurable node/edge/metadata/input limits; linear algorithms; reject before allocation growth where practical | Fuzz/property tests and large-graph benchmarks |
-| T-08 | Warm serverless state leaks between callers | Immutable App state, fresh Invocation Scope, no request data in globals through host API | Concurrent distinct-invocation tests |
+| T-02 | Descriptor spoofing or duplicate identity redirects a requirement | Validated stable IDs, versions, unique providers, explicit bindings, fail-closed ambiguity | `kernox-core` unit/property tests over collisions, bindings, and insertion order |
+| T-03 | Descriptor/type mismatch causes capability confusion | Typed `TypeId` plus declared identity/version validation before atomic publication | `kernox-runtime/tests/lifecycle.rs` negative provisioning/type tests |
+| T-04 | Resolver/service-locator escape grants undeclared ambient authority | Borrowed initialization resolver scoped to declared requirements; no global resolver API | Public API surface review, scope compile-fail doctest, and runtime undeclared-access test |
+| T-05 | Partial initialization or cleanup failure leaves active resources | Transactional publication, reverse rollback, continued cleanup, composite failure report | Lifecycle failure injection and `kernox-testkit` probe tests |
+| T-06 | Plugin task ignores cancellation, panics silently, or prevents shutdown | Host task scope, panic capture without payload retention, fail-closed admission, bounded drain, named report, forced task abort | Paused-time cooperative/stubborn/panicking task fixtures in `kernox-host-tokio` |
+| T-07 | Pathological graph/report exhausts CPU or memory | File, node, declaration, and edge hard ceilings; bounded parser entry; iterative cycle search | Fuzz target, property tests, CLI oversize test, and 10/100/1,000-plugin benchmarks |
+| T-08 | Warm serverless state leaks between callers | Immutable App provisions, fresh Invocation Scope, unique IDs, closed-scope deregistration, no request globals in host API | 64-way concurrent invocation test and 10,000-scope retention regression |
 | T-09 | Panic is mistaken for recoverable plugin isolation | Typed expected failures; document native panic as process failure; isolation only at real boundary | Panic policy tests/documentation and Host recovery tests |
-| T-10 | Dependency or action compromise changes release output | Locked dependencies, advisory/license/source checks, immutable action pins, least-privilege CI, provenance-ready release | CI policy, lockfile audit, package dry-run, release readback |
-| T-11 | Diagnostics disclose secret/plugin payload data | Allowlisted structured fields only; no arbitrary payload/debug object | Snapshot/negative tests with sentinel secrets |
+| T-10 | Dependency or action compromise changes release output | Locked dependencies, advisory/license/source checks, immutable action pins, least-privilege CI, OIDC temporary release token | `xtask`, `deny.toml`, pinned workflows, package dry-run, and release registry readback |
+| T-11 | Diagnostics disclose secret/plugin payload data | Lifecycle observations contain only plugin/scope/phase/outcome/duration; plugin messages remain in returned failures | Public observation type shape plus recorder snapshots |
 | T-12 | Runtime extension receives excess host authority | Future explicit WIT/process capability grants, deny by default, resource quotas and versioned ABI | Required before isolated-extension implementation or release |
 
 ## Residual risk
@@ -74,7 +75,14 @@ boundaries. A crate boundary alone is not isolation.
 - Safe Rust and `unsafe_code = "forbid"` reduce memory-safety risk in owned
   code but do not eliminate compiler, dependency, kernel, or logical defects.
 - A task can ignore cooperative cancellation. The Host must enforce its outer
-  shutdown/resource policy and report incomplete draining.
+  shutdown/resource policy. The Tokio adapter reports the task by bounded name
+  and aborts it after the configured drain budget.
+- The Tokio adapter catches a task unwind only to record failure, close task
+  admission, and cancel peers. This is supervision, not an isolation boundary;
+  process-wide panic policy and memory corruption remain outside its guarantees.
+- Direct `Arc` handles acquired before shutdown are not revocable without an
+  indirection tax. Lifecycle order closes owned work, but callers must stop
+  using retained handles when the application begins shutdown.
 - Supply-chain scans cannot prove a dependency benign; dependency minimization,
   review, locked resolution, and release provenance remain layered controls.
 

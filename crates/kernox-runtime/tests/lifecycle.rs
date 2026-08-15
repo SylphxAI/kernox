@@ -2,7 +2,10 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
 
 use futures::executor::block_on;
 use kernox_core::{
@@ -41,6 +44,25 @@ struct FixedClock;
 impl Clock for FixedClock {
     fn tick(&self) -> u64 {
         42
+    }
+}
+
+struct DescriptorReadProbe {
+    descriptor: PluginDescriptor,
+    reads: Arc<AtomicUsize>,
+}
+
+impl Plugin for DescriptorReadProbe {
+    fn descriptor(&self) -> &PluginDescriptor {
+        self.reads.fetch_add(1, Ordering::Relaxed);
+        &self.descriptor
+    }
+
+    fn initialize<'a>(
+        &'a mut self,
+        _context: InitializationContext<'a>,
+    ) -> BoxFuture<'a, Result<ProvisionSet, PluginError>> {
+        Box::pin(async { Ok(ProvisionSet::new()) })
     }
 }
 
@@ -230,6 +252,13 @@ fn boots_with_direct_typed_handle_and_shuts_down_in_reverse_order_once() {
         assert!(first.is_clean());
         assert_eq!(first, second);
         assert_eq!(
+            app.capability_from::<ClockCapability>(&plugin_id("dev.example.clock-plugin"))
+                .err()
+                .expect("root lookup must close after shutdown")
+                .tag(),
+            "access.application-unavailable"
+        );
+        assert_eq!(
             snapshot(&events),
             [
                 "clock.initialize",
@@ -244,6 +273,22 @@ fn boots_with_direct_typed_handle_and_shuts_down_in_reverse_order_once() {
                 "clock.dispose",
             ]
         );
+    });
+}
+
+#[test]
+fn descriptor_is_snapshotted_once_before_resolution() {
+    block_on(async {
+        let reads = Arc::new(AtomicUsize::new(0));
+        let probe = DescriptorReadProbe {
+            descriptor: PluginDescriptor::new(plugin_id("dev.example.probe"), version()),
+            reads: Arc::clone(&reads),
+        };
+        let mut app = AppBuilder::new().plugin(probe).resolve().unwrap().start().await.unwrap();
+
+        assert_eq!(reads.load(Ordering::Relaxed), 1);
+        assert!(app.shutdown().await.is_clean());
+        assert_eq!(reads.load(Ordering::Relaxed), 1);
     });
 }
 
@@ -266,6 +311,59 @@ fn missing_provision_is_not_committed_and_current_plugin_is_disposed() {
         assert!(error.cleanup_failures.is_empty());
         assert_eq!(snapshot(&events), ["clock.initialize", "clock.dispose"]);
     });
+}
+
+#[test]
+fn undeclared_and_version_mismatched_provisions_fail_before_readiness() {
+    block_on(async {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut undeclared = ClockPlugin::new(Arc::clone(&events));
+        undeclared.descriptor =
+            PluginDescriptor::new(plugin_id("dev.example.clock-plugin"), version());
+        let error = AppBuilder::new()
+            .plugin(undeclared)
+            .resolve()
+            .unwrap()
+            .start()
+            .await
+            .err()
+            .expect("undeclared provision must fail");
+        assert_eq!(error.primary.error_tag, "provision.undeclared");
+
+        let mut mismatched = ClockPlugin::new(events);
+        mismatched.descriptor =
+            PluginDescriptor::new(plugin_id("dev.example.clock-plugin"), version())
+                .provide(CapabilityOffer::new(
+                    capability_id(ClockCapability::ID),
+                    Version::new(2, 0, 0),
+                ))
+                .unwrap();
+        let error = AppBuilder::new()
+            .plugin(mismatched)
+            .resolve()
+            .unwrap()
+            .start()
+            .await
+            .err()
+            .expect("version mismatch must fail");
+        assert_eq!(error.primary.error_tag, "provision.version-mismatch");
+    });
+}
+
+#[test]
+fn duplicate_staged_provision_is_rejected_locally() {
+    let first: Arc<dyn Clock> = Arc::new(FixedClock);
+    let second: Arc<dyn Clock> = Arc::new(FixedClock);
+    let staged = ProvisionSet::new().provide::<ClockCapability>(first).unwrap();
+
+    assert_eq!(
+        staged
+            .provide::<ClockCapability>(second)
+            .err()
+            .expect("duplicate provision must fail")
+            .tag(),
+        "provision.duplicate"
+    );
 }
 
 #[test]
@@ -347,6 +445,33 @@ fn undeclared_capability_access_fails_closed() {
             .expect("boot must fail");
 
         assert_eq!(error.primary.error_tag, "access.undeclared");
+    });
+}
+
+#[test]
+fn dependency_access_mode_must_match_declared_cardinality() {
+    block_on(async {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut consumer = ConsumerPlugin::new(Arc::clone(&events));
+        consumer.descriptor = PluginDescriptor::new(plugin_id("dev.example.consumer"), version())
+            .require(CapabilityRequirement::new(
+                capability_id(ClockCapability::ID),
+                VersionReq::parse("^1.0").unwrap(),
+                kernox_core::RequirementCardinality::ZeroOrOne,
+            ))
+            .unwrap();
+
+        let error = AppBuilder::new()
+            .plugin(consumer)
+            .plugin(ClockPlugin::new(events))
+            .resolve()
+            .unwrap()
+            .start()
+            .await
+            .err()
+            .expect("wrong access mode must fail");
+
+        assert_eq!(error.primary.error_tag, "access.cardinality-mismatch");
     });
 }
 

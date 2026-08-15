@@ -53,9 +53,12 @@ validates the staged set against the descriptor before atomic publication.
 Initialization or startup failure unwinds completed plugins in reverse order.
 Shutdown quiesces, stops, and disposes in reverse order and is idempotent.
 
-Plugin code owns its resources but cannot self-elect global ordering. Host task
-APIs must bind spawned work to a plugin Scope and support cancellation and
-draining. Serverless correctness cannot depend on shutdown being observed.
+Plugin code owns its resources but cannot self-elect global ordering. Official
+Host task APIs bind spawned work to the application supervisor and support
+cancellation, bounded draining, named leak reports, and fail-closed panic
+handling. Individual plugins still close their own admission and resources in
+their lifecycle hooks. Serverless correctness cannot depend on shutdown being
+observed.
 
 ## Rejected alternatives
 

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use semver::Version;
 
@@ -106,6 +106,7 @@ impl GraphBuilder {
 
 /// One resolved requirement and its selected providers.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedRequirement {
     /// Requiring plugin.
@@ -120,6 +121,7 @@ pub struct ResolvedRequirement {
 
 /// One selected provider-to-consumer capability edge.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct ResolvedEdge {
     /// Providing plugin.
@@ -132,6 +134,7 @@ pub struct ResolvedEdge {
 
 /// Stable public summary of one plugin in a graph report.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PluginSummary {
     /// Plugin identity.
@@ -142,6 +145,7 @@ pub struct PluginSummary {
 
 /// Versioned inspectable projection of a resolved graph.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GraphReport {
     /// Report schema version.
@@ -152,10 +156,48 @@ pub struct GraphReport {
     pub requirements: Vec<ResolvedRequirement>,
     /// Capability-attributed edges in stable order.
     pub edges: Vec<ResolvedEdge>,
+    /// Non-fatal composition findings in stable semantic order.
+    pub diagnostics: Vec<GraphDiagnostic>,
     /// Deterministic lifecycle startup order.
     pub startup_order: Vec<PluginId>,
     /// Exact reverse lifecycle teardown order.
     pub teardown_order: Vec<PluginId>,
+}
+
+/// One non-fatal, machine-readable graph finding.
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields))]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[non_exhaustive]
+pub enum GraphDiagnostic {
+    /// An optional dependency has no compatible selected provider.
+    OptionalProviderMissing {
+        /// Requiring plugin.
+        consumer: PluginId,
+        /// Optional capability with no provider.
+        capability: CapabilityId,
+    },
+    /// An offer has no selected plugin dependency edge.
+    ///
+    /// This may be intentional when the application shell acquires the offer
+    /// as a root export.
+    UnselectedOffer {
+        /// Offering plugin.
+        provider: PluginId,
+        /// Offered capability with no selected consumer edge.
+        capability: CapabilityId,
+    },
+}
+
+impl GraphDiagnostic {
+    /// Returns the stable machine-readable diagnostic tag.
+    #[must_use]
+    pub const fn tag(&self) -> &'static str {
+        match self {
+            Self::OptionalProviderMissing { .. } => "graph.optional-provider-missing",
+            Self::UnselectedOffer { .. } => "graph.unselected-offer",
+        }
+    }
 }
 
 /// Immutable validated application graph.
@@ -164,6 +206,7 @@ pub struct ResolvedGraph {
     plugins: BTreeMap<PluginId, PluginDescriptor>,
     requirements: Vec<ResolvedRequirement>,
     edges: Vec<ResolvedEdge>,
+    diagnostics: Vec<GraphDiagnostic>,
     startup_order: Vec<PluginId>,
 }
 
@@ -190,6 +233,12 @@ impl ResolvedGraph {
     #[must_use]
     pub fn edges(&self) -> &[ResolvedEdge] {
         &self.edges
+    }
+
+    /// Returns non-fatal graph findings in stable semantic order.
+    #[must_use]
+    pub fn diagnostics(&self) -> &[GraphDiagnostic] {
+        &self.diagnostics
     }
 
     /// Returns deterministic startup order.
@@ -219,6 +268,7 @@ impl ResolvedGraph {
                 .collect(),
             requirements: self.requirements.clone(),
             edges: self.edges.clone(),
+            diagnostics: self.diagnostics.clone(),
             startup_order: self.startup_order.clone(),
             teardown_order: self.startup_order.iter().rev().cloned().collect(),
         }
@@ -239,7 +289,8 @@ fn resolve(spec: CompositionSpec) -> Result<ResolvedGraph, ResolveError> {
     let mut plugins = BTreeMap::new();
     for descriptor in spec.plugins {
         let id = descriptor.id().clone();
-        let declaration_count = descriptor.provides().len() + descriptor.requires().len();
+        let declaration_count =
+            descriptor.provides().len().saturating_add(descriptor.requires().len());
         if declaration_count > spec.limits.max_capabilities_per_plugin {
             return Err(ResolveError::CapabilityLimitExceeded {
                 plugin: id,
@@ -265,26 +316,7 @@ fn resolve(spec: CompositionSpec) -> Result<ResolvedGraph, ResolveError> {
         }
     }
 
-    let mut bindings = BTreeMap::new();
-    for binding in spec.bindings {
-        if !plugins.contains_key(binding.consumer()) {
-            return Err(ResolveError::UnknownBindingConsumer {
-                consumer: binding.consumer().clone(),
-            });
-        }
-        if !plugins.contains_key(binding.provider()) {
-            return Err(ResolveError::UnknownBindingProvider {
-                provider: binding.provider().clone(),
-            });
-        }
-        let key = (binding.consumer().clone(), binding.capability().clone());
-        if bindings.insert(key, binding.provider().clone()).is_some() {
-            return Err(ResolveError::DuplicateBinding {
-                consumer: binding.consumer().clone(),
-                capability: binding.capability().clone(),
-            });
-        }
-    }
+    let bindings = validated_bindings(spec.bindings, &plugins)?;
 
     let mut resolved_requirements = Vec::new();
     let mut resolved_edges = BTreeSet::new();
@@ -338,9 +370,76 @@ fn resolve(spec: CompositionSpec) -> Result<ResolvedGraph, ResolveError> {
     }
 
     let edges: Vec<_> = resolved_edges.into_iter().collect();
+    let diagnostics = graph_diagnostics(&plugins, &resolved_requirements, &edges);
     let startup_order = topological_order(plugins.keys(), &edges)?;
 
-    Ok(ResolvedGraph { plugins, requirements: resolved_requirements, edges, startup_order })
+    Ok(ResolvedGraph {
+        plugins,
+        requirements: resolved_requirements,
+        edges,
+        diagnostics,
+        startup_order,
+    })
+}
+
+fn validated_bindings(
+    declared: Vec<Binding>,
+    plugins: &BTreeMap<PluginId, PluginDescriptor>,
+) -> Result<BTreeMap<(PluginId, CapabilityId), PluginId>, ResolveError> {
+    let mut bindings = BTreeMap::new();
+    for binding in declared {
+        if !plugins.contains_key(binding.consumer()) {
+            return Err(ResolveError::UnknownBindingConsumer {
+                consumer: binding.consumer().clone(),
+            });
+        }
+        if !plugins.contains_key(binding.provider()) {
+            return Err(ResolveError::UnknownBindingProvider {
+                provider: binding.provider().clone(),
+            });
+        }
+        let key = (binding.consumer().clone(), binding.capability().clone());
+        if bindings.insert(key, binding.provider().clone()).is_some() {
+            return Err(ResolveError::DuplicateBinding {
+                consumer: binding.consumer().clone(),
+                capability: binding.capability().clone(),
+            });
+        }
+    }
+    Ok(bindings)
+}
+
+fn graph_diagnostics(
+    plugins: &BTreeMap<PluginId, PluginDescriptor>,
+    requirements: &[ResolvedRequirement],
+    edges: &[ResolvedEdge],
+) -> Vec<GraphDiagnostic> {
+    let mut selected = HashSet::new();
+    for edge in edges {
+        selected.insert((&edge.provider, &edge.capability));
+    }
+    let mut diagnostics = BTreeSet::new();
+
+    for requirement in requirements {
+        if requirement.providers.is_empty() && requirement.cardinality.permits_zero() {
+            diagnostics.insert(GraphDiagnostic::OptionalProviderMissing {
+                consumer: requirement.consumer.clone(),
+                capability: requirement.capability.clone(),
+            });
+        }
+    }
+    for descriptor in plugins.values() {
+        for offer in descriptor.provides() {
+            if !selected.contains(&(descriptor.id(), offer.id())) {
+                diagnostics.insert(GraphDiagnostic::UnselectedOffer {
+                    provider: descriptor.id().clone(),
+                    capability: offer.id().clone(),
+                });
+            }
+        }
+    }
+
+    diagnostics.into_iter().collect()
 }
 
 fn validate_configured_limits(limits: GraphLimits) -> Result<(), ResolveError> {
@@ -550,6 +649,19 @@ fn find_cycle(
         Done,
     }
 
+    let neighbours: BTreeMap<_, Vec<_>> = remaining
+        .iter()
+        .map(|plugin| {
+            let outgoing = adjacency
+                .get(plugin)
+                .into_iter()
+                .flatten()
+                .filter(|candidate| remaining.contains(*candidate))
+                .cloned()
+                .collect();
+            (plugin.clone(), outgoing)
+        })
+        .collect();
     let mut states = BTreeMap::new();
 
     for start in remaining {
@@ -563,15 +675,8 @@ fn find_cycle(
         states.insert(start.clone(), State::Visiting);
 
         while let Some((node, next_index)) = stack.last_mut() {
-            let neighbours: Vec<_> = adjacency
-                .get(node)
-                .into_iter()
-                .flatten()
-                .filter(|candidate| remaining.contains(*candidate))
-                .cloned()
-                .collect();
-
-            if *next_index >= neighbours.len() {
+            let outgoing = &neighbours[node];
+            if *next_index >= outgoing.len() {
                 let finished = node.clone();
                 stack.pop();
                 path.pop();
@@ -580,7 +685,7 @@ fn find_cycle(
                 continue;
             }
 
-            let next = neighbours[*next_index].clone();
+            let next = outgoing[*next_index].clone();
             *next_index += 1;
 
             match states.get(&next) {
@@ -629,6 +734,10 @@ mod tests {
 
     fn requirement() -> VersionReq {
         VersionReq::parse("^1.0").unwrap()
+    }
+
+    fn assert_resolve_tag(builder: GraphBuilder, expected: &str) {
+        assert_eq!(builder.resolve().unwrap_err().tag(), expected);
     }
 
     #[test]
@@ -685,6 +794,49 @@ mod tests {
     }
 
     #[test]
+    fn multi_provider_selection_is_compatible_and_identity_ordered() {
+        let clock = capability("dev.example.clock");
+        let compatible_b = PluginDescriptor::new(plugin("dev.example.provider-b"), version())
+            .provide(CapabilityOffer::new(clock.clone(), Version::new(1, 2, 0)))
+            .unwrap();
+        let incompatible = PluginDescriptor::new(plugin("dev.example.provider-c"), version())
+            .provide(CapabilityOffer::new(clock.clone(), Version::new(2, 0, 0)))
+            .unwrap();
+        let compatible_a = PluginDescriptor::new(plugin("dev.example.provider-a"), version())
+            .provide(CapabilityOffer::new(clock.clone(), Version::new(1, 1, 0)))
+            .unwrap();
+        let consumer = PluginDescriptor::new(plugin("dev.example.consumer"), version())
+            .require(CapabilityRequirement::new(
+                clock,
+                requirement(),
+                RequirementCardinality::OneOrMore,
+            ))
+            .unwrap();
+
+        let graph = GraphBuilder::new()
+            .plugin(compatible_b)
+            .plugin(incompatible)
+            .plugin(consumer)
+            .plugin(compatible_a)
+            .resolve()
+            .unwrap();
+
+        assert_eq!(
+            graph.requirements()[0].providers,
+            [plugin("dev.example.provider-a"), plugin("dev.example.provider-b")]
+        );
+        let positions: BTreeMap<_, _> = graph
+            .startup_order()
+            .iter()
+            .enumerate()
+            .map(|(position, plugin)| (plugin.clone(), position))
+            .collect();
+        assert!(
+            graph.edges().iter().all(|edge| positions[&edge.provider] < positions[&edge.consumer])
+        );
+    }
+
+    #[test]
     fn returns_an_exact_cycle_path() {
         let cap_a = capability("dev.example.cap-a");
         let cap_b = capability("dev.example.cap-b");
@@ -713,6 +865,156 @@ mod tests {
         let error = GraphBuilder::from_spec(spec).resolve().unwrap_err();
 
         assert_eq!(error.tag(), "graph.unsupported-schema-version");
+    }
+
+    #[test]
+    fn reports_optional_misses_and_unselected_root_offers_deterministically() {
+        let optional = capability("dev.example.optional");
+        let exported = capability("dev.example.exported");
+        let consumer = PluginDescriptor::new(plugin("dev.example.consumer"), version())
+            .require(CapabilityRequirement::new(
+                optional.clone(),
+                requirement(),
+                RequirementCardinality::ZeroOrOne,
+            ))
+            .unwrap();
+        let provider = PluginDescriptor::new(plugin("dev.example.provider"), version())
+            .provide(CapabilityOffer::new(exported.clone(), version()))
+            .unwrap();
+
+        let graph = GraphBuilder::new().plugin(provider).plugin(consumer).resolve().unwrap();
+
+        assert_eq!(
+            graph.diagnostics(),
+            [
+                GraphDiagnostic::OptionalProviderMissing {
+                    consumer: plugin("dev.example.consumer"),
+                    capability: optional,
+                },
+                GraphDiagnostic::UnselectedOffer {
+                    provider: plugin("dev.example.provider"),
+                    capability: exported,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn graph_contract_failures_have_stable_repair_tags() {
+        let clock = capability("dev.example.clock");
+        let consumer_id = plugin("dev.example.consumer");
+        let provider_id = plugin("dev.example.provider");
+        let consumer = || {
+            PluginDescriptor::new(consumer_id.clone(), version())
+                .require(CapabilityRequirement::exactly_one(clock.clone(), requirement()))
+                .unwrap()
+        };
+        let provider = || {
+            PluginDescriptor::new(provider_id.clone(), version())
+                .provide(CapabilityOffer::new(clock.clone(), version()))
+                .unwrap()
+        };
+        let binding = || Binding::new(consumer_id.clone(), clock.clone(), provider_id.clone());
+
+        assert_resolve_tag(GraphBuilder::new().plugin(consumer()), "graph.missing-provider");
+
+        let incompatible = PluginDescriptor::new(provider_id.clone(), version())
+            .provide(CapabilityOffer::new(clock.clone(), Version::new(2, 0, 0)))
+            .unwrap();
+        assert_resolve_tag(
+            GraphBuilder::new().plugin(consumer()).plugin(incompatible.clone()),
+            "graph.incompatible-provider",
+        );
+        assert_resolve_tag(
+            GraphBuilder::new().plugin(consumer()).plugin(incompatible).binding(binding()),
+            "graph.incompatible-binding",
+        );
+
+        let self_dependent = PluginDescriptor::new(consumer_id.clone(), version())
+            .provide(CapabilityOffer::new(clock.clone(), version()))
+            .unwrap()
+            .require(CapabilityRequirement::exactly_one(clock.clone(), requirement()))
+            .unwrap();
+        assert_resolve_tag(GraphBuilder::new().plugin(self_dependent), "graph.self-dependency");
+
+        let conflicting = PluginDescriptor::new(consumer_id.clone(), version())
+            .conflict_with(provider_id.clone())
+            .unwrap();
+        assert_resolve_tag(
+            GraphBuilder::new().plugin(conflicting).plugin(provider()),
+            "graph.plugin-conflict",
+        );
+        assert_resolve_tag(
+            GraphBuilder::new().plugin(provider()).plugin(provider()),
+            "graph.duplicate-plugin",
+        );
+
+        assert_resolve_tag(
+            GraphBuilder::new().plugin(provider()).binding(binding()),
+            "graph.unknown-binding-consumer",
+        );
+        assert_resolve_tag(
+            GraphBuilder::new().plugin(consumer()).binding(binding()),
+            "graph.unknown-binding-provider",
+        );
+        assert_resolve_tag(
+            GraphBuilder::new()
+                .plugin(PluginDescriptor::new(consumer_id.clone(), version()))
+                .plugin(provider())
+                .binding(binding()),
+            "graph.unused-binding",
+        );
+        assert_resolve_tag(
+            GraphBuilder::new()
+                .plugin(consumer())
+                .plugin(PluginDescriptor::new(provider_id.clone(), version()))
+                .binding(binding()),
+            "graph.binding-provider-does-not-offer",
+        );
+        assert_resolve_tag(
+            GraphBuilder::new()
+                .plugin(consumer())
+                .plugin(provider())
+                .binding(binding())
+                .binding(binding()),
+            "graph.duplicate-binding",
+        );
+
+        let multi = PluginDescriptor::new(consumer_id.clone(), version())
+            .require(CapabilityRequirement::new(
+                clock.clone(),
+                requirement(),
+                RequirementCardinality::ZeroOrMore,
+            ))
+            .unwrap();
+        assert_resolve_tag(
+            GraphBuilder::new().plugin(multi).plugin(provider()).binding(binding()),
+            "graph.binding-for-multiple",
+        );
+
+        assert_resolve_tag(
+            GraphBuilder::new()
+                .with_limits(GraphLimits { max_plugins: 0, ..GraphLimits::default() })
+                .plugin(provider()),
+            "graph.plugin-limit",
+        );
+        assert_resolve_tag(
+            GraphBuilder::new()
+                .with_limits(GraphLimits {
+                    max_capabilities_per_plugin: 0,
+                    ..GraphLimits::default()
+                })
+                .plugin(provider()),
+            "graph.capability-limit",
+        );
+        assert_resolve_tag(
+            GraphBuilder::new()
+                .with_limits(GraphLimits { max_edges: 0, ..GraphLimits::default() })
+                .plugin(consumer())
+                .plugin(provider()),
+            "graph.edge-limit",
+        );
     }
 
     #[test]

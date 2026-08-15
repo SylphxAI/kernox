@@ -62,24 +62,26 @@ impl AppBuilder {
     /// Returns [`ResolveError`] when identities, dependencies, bindings,
     /// conflicts, cycles, or resource limits are invalid.
     pub fn resolve(self) -> Result<ResolvedApp, ResolveError> {
-        let mut graph_builder = GraphBuilder::new().with_limits(self.limits);
-        for plugin in &self.plugins {
-            graph_builder = graph_builder.plugin(plugin.descriptor().clone());
+        let Self { plugins, bindings, limits, observer } = self;
+        let declared: Vec<_> =
+            plugins.into_iter().map(|plugin| (plugin.descriptor().clone(), plugin)).collect();
+        let mut graph_builder = GraphBuilder::new().with_limits(limits);
+        for (descriptor, _) in &declared {
+            graph_builder = graph_builder.plugin(descriptor.clone());
         }
-        for binding in self.bindings {
+        for binding in bindings {
             graph_builder = graph_builder.binding(binding);
         }
         let graph = Arc::new(graph_builder.resolve()?);
-        let plugins = self
-            .plugins
+        let plugins = declared
             .into_iter()
-            .map(|plugin| (plugin.descriptor().id().clone(), plugin))
+            .map(|(descriptor, plugin)| (descriptor.id().clone(), plugin))
             .collect();
 
         Ok(ResolvedApp {
             graph,
             plugins,
-            observer: self.observer.unwrap_or_else(default_sink),
+            observer: observer.unwrap_or_else(default_sink),
             scope: Scope::application(),
         })
     }
@@ -147,7 +149,10 @@ impl ResolvedApp {
                 }
             };
 
-            let descriptor = self.plugins[plugin_id].descriptor();
+            let descriptor = self
+                .graph
+                .plugin(plugin_id)
+                .unwrap_or_else(|| unreachable!("startup order contains only resolved plugins"));
             if let Err(error) = registry.commit(plugin_id, descriptor, staged) {
                 self.observe_failure(
                     plugin_id,

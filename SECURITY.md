@@ -2,9 +2,9 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest released minor line. Before the
-first release, only the default branch is supported and no compatibility or
-production-readiness claim is made.
+Security fixes are provided for the latest released minor line. If no registry
+release exists yet, only the default branch is eligible for coordinated fixes;
+source-candidate status is not a package-release claim.
 
 ## Reporting a vulnerability
 

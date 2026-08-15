@@ -8,10 +8,12 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+futures-util.workspace = true
 kernox-core.workspace = true
 kernox-runtime = { path = "../kernox-runtime", version = "1.0.0" }
 semver.workspace = true
