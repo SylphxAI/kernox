@@ -9,7 +9,10 @@ use std::{
 };
 
 use clap::{Parser, Subcommand, ValueEnum};
-use kernox_core::{CompositionSpec, GraphBuilder, GraphReport, ResolveError};
+use kernox_core::{
+    AttributionError, CompositionSpec, GraphBuilder, GraphReport, ResolveError,
+    verify_graph_attribution,
+};
 use thiserror::Error;
 
 const MAX_SPEC_BYTES: u64 = 16 * 1024 * 1024;
@@ -28,6 +31,10 @@ enum Command {
     Check {
         /// JSON composition file, or `-` for standard input.
         spec: PathBuf,
+        /// Require the North Star graph shape: at least three plugins with
+        /// unique package and repository attribution.
+        #[arg(long)]
+        verified: bool,
     },
     /// Resolve and render the selected capability graph.
     Graph {
@@ -55,6 +62,8 @@ enum CliError {
     Json(#[from] serde_json::Error),
     #[error("composition rejected: {0}")]
     Resolve(#[from] ResolveError),
+    #[error("verified application graph rejected: {0}")]
+    Attribution(#[from] AttributionError),
     #[error("failed to render graph: {0}")]
     Format(#[from] fmt::Error),
 }
@@ -66,6 +75,7 @@ impl CliError {
             Self::InputTooLarge => "cli.input-too-large",
             Self::Json(_) => "cli.invalid-json",
             Self::Resolve(error) => error.tag(),
+            Self::Attribution(error) => error.tag(),
             Self::Format(_) => "cli.format-failed",
         }
     }
@@ -91,18 +101,29 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<String, CliError> {
     match cli.command {
-        Command::Check { spec } => {
-            let report = load_and_resolve(&spec)?;
-            Ok(format!(
-                "valid: {} plugin(s), {} edge(s), {} diagnostic(s), schema {}",
-                report.plugins.len(),
-                report.edges.len(),
-                report.diagnostics.len(),
-                report.schema_version
-            ))
+        Command::Check { spec, verified } => {
+            let (graph, report) = load_and_resolve(&spec)?;
+            if verified {
+                let attribution = verify_graph_attribution(&graph)?;
+                Ok(format!(
+                    "verified: {} plugin(s), {} source package(s), {} edge(s), schema {}",
+                    attribution.plugin_count,
+                    attribution.source_packages.len(),
+                    report.edges.len(),
+                    report.schema_version
+                ))
+            } else {
+                Ok(format!(
+                    "valid: {} plugin(s), {} edge(s), {} diagnostic(s), schema {}",
+                    report.plugins.len(),
+                    report.edges.len(),
+                    report.diagnostics.len(),
+                    report.schema_version
+                ))
+            }
         }
         Command::Graph { spec, format } => {
-            let report = load_and_resolve(&spec)?;
+            let (_, report) = load_and_resolve(&spec)?;
             match format {
                 GraphFormat::Json => Ok(serde_json::to_string_pretty(&report)?),
                 GraphFormat::Dot => Ok(render_dot(&report)?),
@@ -111,14 +132,16 @@ fn run(cli: Cli) -> Result<String, CliError> {
     }
 }
 
-fn load_and_resolve(path: &Path) -> Result<GraphReport, CliError> {
+fn load_and_resolve(path: &Path) -> Result<(kernox_core::ResolvedGraph, GraphReport), CliError> {
     let bytes = if path == Path::new("-") {
         read_bounded(io::stdin().lock())?
     } else {
         read_bounded(File::open(path)?)?
     };
     let spec: CompositionSpec = serde_json::from_slice(&bytes)?;
-    Ok(GraphBuilder::from_spec(spec).resolve()?.report())
+    let graph = GraphBuilder::from_spec(spec).resolve()?;
+    let report = graph.report();
+    Ok((graph, report))
 }
 
 fn read_bounded(reader: impl Read) -> Result<Vec<u8>, CliError> {
@@ -168,6 +191,49 @@ mod tests {
         let report = GraphBuilder::from_spec(spec).resolve().unwrap().report();
 
         assert_eq!(render_dot(&report).unwrap(), "digraph kernox {\n  rankdir=LR;\n}\n");
+    }
+
+    #[test]
+    fn verified_check_requires_three_attributed_plugins() {
+        let two = br#"{
+            "schema_version": 1,
+            "limits": {"max_plugins": 10, "max_capabilities_per_plugin": 10, "max_edges": 10},
+            "plugins": [
+                {
+                    "id": "dev.example.clock",
+                    "version": "1.0.0",
+                    "source": {"package": "pkg-clock", "repository": "https://example.invalid/clock"},
+                    "provides": [{"id": "dev.example.clock", "version": "1.0.0"}],
+                    "requires": [],
+                    "conflicts": []
+                },
+                {
+                    "id": "dev.example.orders",
+                    "version": "1.0.0",
+                    "source": {"package": "pkg-orders", "repository": "https://example.invalid/orders"},
+                    "provides": [],
+                    "requires": [{"id": "dev.example.clock", "version": "^1.0", "cardinality": "ExactlyOne"}],
+                    "conflicts": []
+                }
+            ],
+            "bindings": []
+        }"#;
+        let spec: CompositionSpec = serde_json::from_slice(two).unwrap();
+        let graph = GraphBuilder::from_spec(spec).resolve().unwrap();
+        assert_eq!(
+            verify_graph_attribution(&graph).unwrap_err().tag(),
+            "conformance.too-few-plugins"
+        );
+
+        let verified = std::fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/compositions/verified.json"),
+        )
+        .unwrap();
+        let spec: CompositionSpec = serde_json::from_slice(&verified).unwrap();
+        let report = verify_graph_attribution(&GraphBuilder::from_spec(spec).resolve().unwrap())
+            .expect("verified fixture must pass");
+        assert_eq!(report.plugin_count, 3);
+        assert_eq!(report.source_packages.len(), 3);
     }
 
     #[test]

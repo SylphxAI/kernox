@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "limits": {
+    "max_plugins": 10,
+    "max_capabilities_per_plugin": 10,
+    "max_edges": 10
+  },
+  "plugins": [
+    {
+      "id": "dev.example.clock",
+      "version": "1.0.0",
+      "source": {
+        "package": "kernox-example-system-clock",
+        "repository": "https://github.com/SylphxAI/kernox"
+      },
+      "provides": [
+        {
+          "id": "dev.example.clock",
+          "version": "1.0.0"
+        }
+      ],
+      "requires": [],
+      "conflicts": []
+    },
+    {
+      "id": "dev.example.store",
+      "version": "1.0.0",
+      "source": {
+        "package": "kernox-example-order-store",
+        "repository": "https://github.com/SylphxAI/kernox"
+      },
+      "provides": [
+        {
+          "id": "dev.example.orders.store",
+          "version": "1.0.0"
+        }
+      ],
+      "requires": [],
+      "conflicts": []
+    },
+    {
+      "id": "dev.example.orders",
+      "version": "1.0.0",
+      "source": {
+        "package": "kernox-example-order-service",
+        "repository": "https://github.com/SylphxAI/kernox"
+      },
+      "provides": [],
+      "requires": [
+        {
+          "id": "dev.example.clock",
+          "version": "^1.0",
+          "cardinality": "ExactlyOne"
+        },
+        {
+          "id": "dev.example.orders.store",
+          "version": "^1.0",
+          "cardinality": "ExactlyOne"
+        }
+      ],
+      "conflicts": []
+    }
+  ],
+  "bindings": []
+}

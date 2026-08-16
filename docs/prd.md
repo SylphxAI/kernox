@@ -83,7 +83,8 @@ through a small sink contract without importing a telemetry SDK into core.
 ### KR-008 — Inspection and conformance tooling
 
 Export a versioned graph description and provide CLI validation/rendering,
-architecture checks, reference fixtures, and a plugin conformance testkit.
+architecture checks including verified-application source attribution,
+reference fixtures, and a plugin conformance testkit.
 
 ### KR-009 — Compatibility and extension ladder
 

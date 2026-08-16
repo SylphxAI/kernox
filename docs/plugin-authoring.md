@@ -94,9 +94,15 @@ assert_eq!(report.plugin_count, 3);
 ```
 
 Conformance requires at least three plugins, complete source attribution, and
-unique source package names. It proves composition and lifecycle behavior; it
-does not by itself prove independent legal ownership, registry publication, or
-deployment.
+unique source package names. The graph shape can be checked without startup:
+
+```bash
+cargo run -p cargo-kernox -- kernox check fixtures/compositions/verified.json --verified
+```
+
+A passing check or `verify_application` proves composition and, for the
+testkit, lifecycle behavior; it does not by itself prove independent legal
+ownership, registry publication, or deployment.
 
 See [`examples/order-app/src/lib.rs`](../examples/order-app/src/lib.rs) for a
 three-plugin implementation used unchanged by two Hosts.
