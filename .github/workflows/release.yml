@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   crates-io:
-    runs-on: ubuntu-latest
+    runs-on: sylphx-linux-standard
     timeout-minutes: 45
     environment: crates-io
     steps:

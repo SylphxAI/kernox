@@ -62,6 +62,9 @@ Exit evidence:
 
 - Exact candidate passes the single repository verification entrypoint and CI
   on PR and merge-group events.
+- Every workflow job runs on one approved Sylphx Platform self-hosted profile;
+  the macOS portability lane is retained, while Windows portability remains an
+  explicit Platform-owned acceptance residual until an approved profile exists.
 - The publishable package set has one version, complete metadata, and a
   topological dependency order; `cargo package --locked --workspace` produces
   the full dry-run artifact set from the locked source.
