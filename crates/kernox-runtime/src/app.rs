@@ -277,8 +277,7 @@ impl ResolvedApp {
         self.observe_failure(plugin_id, LifecyclePhase::Initialize, started_at, error_tag);
         let mut rollback = initialized.to_vec();
         rollback.push(plugin_id.clone());
-        let cleanup_failures = self.cleanup(&rollback, &[LifecyclePhase::Dispose]).await;
-        self.close_scope();
+        let cleanup_failures = self.rollback_dispose(&rollback).await;
         LifecycleFailure { primary, cleanup_failures }
     }
 
@@ -320,10 +319,7 @@ impl ResolvedApp {
             let primary = plugin_failure(plugin_id, LifecyclePhase::Start, &error);
             let mut affected = started.to_vec();
             affected.push(plugin_id.clone());
-            let mut cleanup_failures =
-                self.cleanup(&affected, &[LifecyclePhase::Quiesce, LifecyclePhase::Stop]).await;
-            cleanup_failures.extend(self.cleanup(initialized, &[LifecyclePhase::Dispose]).await);
-            self.close_scope();
+            let cleanup_failures = self.rollback_start(&affected, initialized).await;
             return Err(LifecycleFailure { primary, cleanup_failures });
         }
         Ok(())
@@ -348,6 +344,26 @@ impl ResolvedApp {
                 }
             }
         }
+        failures
+    }
+
+    async fn rollback_dispose(&mut self, plugins: &[PluginId]) -> Vec<FailureRecord> {
+        self.scope.begin_close();
+        let failures = self.cleanup(plugins, &[LifecyclePhase::Dispose]).await;
+        self.scope.finish_close();
+        failures
+    }
+
+    async fn rollback_start(
+        &mut self,
+        affected: &[PluginId],
+        initialized: &[PluginId],
+    ) -> Vec<FailureRecord> {
+        self.scope.begin_close();
+        let mut failures =
+            self.cleanup(affected, &[LifecyclePhase::Quiesce, LifecyclePhase::Stop]).await;
+        failures.extend(self.cleanup(initialized, &[LifecyclePhase::Dispose]).await);
+        self.scope.finish_close();
         failures
     }
 
@@ -398,11 +414,6 @@ impl ResolvedApp {
                 duration: started_at.elapsed(),
             },
         );
-    }
-
-    fn close_scope(&self) {
-        self.scope.begin_close();
-        self.scope.finish_close();
     }
 }
 

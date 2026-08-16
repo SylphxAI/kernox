@@ -13,7 +13,7 @@ use kernox_core::{
 };
 use kernox_runtime::{
     AppBuilder, BoxFuture, Capability, InitializationContext, LifecycleContext,
-    LifecycleObservation, ObservationSink, Plugin, PluginError, ProvisionSet,
+    LifecycleObservation, ObservationSink, Plugin, PluginError, ProvisionSet, ScopeState,
 };
 use semver::{Version, VersionReq};
 
@@ -71,6 +71,7 @@ struct ClockPlugin {
     events: Arc<Mutex<Vec<String>>>,
     publish: bool,
     fail_stop: bool,
+    scope_states: Option<Arc<Mutex<Vec<ScopeState>>>>,
 }
 
 impl ClockPlugin {
@@ -78,7 +79,7 @@ impl ClockPlugin {
         let descriptor = PluginDescriptor::new(plugin_id("dev.example.clock-plugin"), version())
             .provide(CapabilityOffer::new(capability_id(ClockCapability::ID), version()))
             .unwrap();
-        Self { descriptor, events, publish: true, fail_stop: false }
+        Self { descriptor, events, publish: true, fail_stop: false, scope_states: None }
     }
 }
 
@@ -115,16 +116,18 @@ impl Plugin for ClockPlugin {
 
     fn quiesce<'a>(
         &'a mut self,
-        _context: LifecycleContext<'a>,
+        context: LifecycleContext<'a>,
     ) -> BoxFuture<'a, Result<(), PluginError>> {
+        record_scope_state(self.scope_states.as_ref(), context);
         record(&self.events, "clock.quiesce");
         Box::pin(async { Ok(()) })
     }
 
     fn stop<'a>(
         &'a mut self,
-        _context: LifecycleContext<'a>,
+        context: LifecycleContext<'a>,
     ) -> BoxFuture<'a, Result<(), PluginError>> {
+        record_scope_state(self.scope_states.as_ref(), context);
         record(&self.events, "clock.stop");
         let fail = self.fail_stop;
         Box::pin(async move {
@@ -138,8 +141,9 @@ impl Plugin for ClockPlugin {
 
     fn dispose<'a>(
         &'a mut self,
-        _context: LifecycleContext<'a>,
+        context: LifecycleContext<'a>,
     ) -> BoxFuture<'a, Result<(), PluginError>> {
+        record_scope_state(self.scope_states.as_ref(), context);
         record(&self.events, "clock.dispose");
         Box::pin(async { Ok(()) })
     }
@@ -337,8 +341,10 @@ fn descriptor_is_snapshotted_once_before_resolution() {
 fn missing_provision_is_not_committed_and_current_plugin_is_disposed() {
     block_on(async {
         let events = Arc::new(Mutex::new(Vec::new()));
+        let scope_states = Arc::new(Mutex::new(Vec::new()));
         let mut clock = ClockPlugin::new(Arc::clone(&events));
         clock.publish = false;
+        clock.scope_states = Some(Arc::clone(&scope_states));
         let error = AppBuilder::new()
             .plugin(clock)
             .resolve()
@@ -351,6 +357,7 @@ fn missing_provision_is_not_committed_and_current_plugin_is_disposed() {
         assert_eq!(error.primary.error_tag, "provision.missing");
         assert!(error.cleanup_failures.is_empty());
         assert_eq!(snapshot(&events), ["clock.initialize", "clock.dispose"]);
+        assert_eq!(snapshot_scope_states(&scope_states), [ScopeState::Closing]);
     });
 }
 
@@ -411,8 +418,10 @@ fn duplicate_staged_provision_is_rejected_locally() {
 fn start_failure_rolls_back_all_phases_and_preserves_cleanup_failures() {
     block_on(async {
         let events = Arc::new(Mutex::new(Vec::new()));
+        let scope_states = Arc::new(Mutex::new(Vec::new()));
         let mut clock = ClockPlugin::new(Arc::clone(&events));
         clock.fail_stop = true;
+        clock.scope_states = Some(Arc::clone(&scope_states));
         let mut consumer = ConsumerPlugin::new(Arc::clone(&events));
         consumer.fail_start = true;
 
@@ -443,6 +452,10 @@ fn start_failure_rolls_back_all_phases_and_preserves_cleanup_failures() {
                 "consumer.dispose",
                 "clock.dispose",
             ]
+        );
+        assert_eq!(
+            snapshot_scope_states(&scope_states),
+            [ScopeState::Closing, ScopeState::Closing, ScopeState::Closing]
         );
     });
 }
@@ -781,8 +794,18 @@ fn record(events: &Mutex<Vec<String>>, event: &str) {
     events.lock().unwrap().push(event.to_owned());
 }
 
+fn record_scope_state(states: Option<&Arc<Mutex<Vec<ScopeState>>>>, context: LifecycleContext<'_>) {
+    if let Some(states) = states {
+        states.lock().unwrap().push(context.scope().state());
+    }
+}
+
 fn snapshot(events: &Mutex<Vec<String>>) -> Vec<String> {
     events.lock().unwrap().clone()
+}
+
+fn snapshot_scope_states(states: &Mutex<Vec<ScopeState>>) -> Vec<ScopeState> {
+    states.lock().unwrap().clone()
 }
 
 fn plugin_id(value: &str) -> PluginId {

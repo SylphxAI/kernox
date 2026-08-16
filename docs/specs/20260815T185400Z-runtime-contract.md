@@ -75,7 +75,9 @@ without an explicit indirection contract.
 Rollback records the primary failure and every cleanup failure without losing
 either. Cleanup continues after an individual cleanup error or hook unwind. A
 repeated shutdown returns the prior terminal report and performs no second
-effect.
+effect. Rollback closes application-scope admission before invoking quiesce,
+stop, or dispose hooks and keeps the scope in `Closing` until cleanup
+completes.
 
 ## Scope contract
 
