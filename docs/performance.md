@@ -70,13 +70,32 @@ in the same process. The point estimates were within 0.3%; an earlier run on
 the same machine showed a roughly 2% spread, which is why a single Criterion
 comparison is not treated as a product regression or an acceleration claim.
 
+## Bounded typed-consumer workload — 2026-08-16
+
+The standalone consumer fixture now exercises the complete typed graph under a
+small, reproducible concurrent workload:
+
+```text
+cargo run --release --locked --manifest-path fixtures/clean-consumer/Cargo.toml -- --workload
+```
+
+Four threads each issue 512 calls through the exported `Application` handle;
+the fixture checks every `hello, Kernox @42ms` result and records one duration
+per call. A local development snapshot on Linux 6.18.18 x86_64, AMD EPYC 9454,
+rustc 1.97.1 in the optimized release profile reported 2,048 calls at p50
+`60 ns`, p95 `110 ns`, p99 `130 ns`, and max `3,395 ns`. The verification
+command enforces a deliberately broad p99 guardrail of 5 ms and a max-call
+guardrail of 100 ms: these catch gross regressions in the real consumer path
+without pretending to be an SLA.
+
 ## What this does not prove
 
 Kernox is not yet “optimized to the limit.” The evidence proves that the
 post-composition call shape is direct typed-handle dispatch and that the tested
-control-plane paths are bounded on one machine. It does not yet characterize
-allocator profiles, cold-start distributions, high-concurrency contention,
-provider I/O, end-to-end application latency, cache behavior across CPUs, or
-tail latency under load. Those are explicit follow-up measurements before any
-stable 1.0 decision; optimization work should follow a measured bottleneck
-instead of adding speculative machinery to the core.
+control-plane paths and this bounded consumer workload are bounded on one
+machine. It does not yet characterize allocator profiles, cold-start
+distributions, sustained high-concurrency contention, provider I/O, end-to-end
+application latency, cache behavior across CPUs, or tail latency under
+sustained load. Those are explicit follow-up measurements before any stable
+1.0 decision; optimization work should follow a measured bottleneck instead of
+adding speculative machinery to the core.

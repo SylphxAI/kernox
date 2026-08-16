@@ -41,7 +41,9 @@ The goal is measured proportional overhead, not an unprovable claim of
 - indexed dependency acquisition during initialization;
 - application boot and reverse shutdown;
 - warm invocation-scope admission and release; and
-- steady-state direct typed-handle calls versus hand-written direct calls.
+- steady-state direct typed-handle calls versus hand-written direct calls; and
+- a bounded four-thread standalone-consumer workload with percentile and
+  maximum-latency guardrails.
 
 The normal-call path must remain direct typed-handle dispatch after composition;
 it must not perform graph lookup, serialization, locking for Kernox metadata, or
@@ -55,5 +57,8 @@ single noisy sample moves.
 - `checkout-app` proves explicit provider binding and unchanged domain code.
 - `worker-app` proves supervised task cancellation and clean shutdown.
 - `order-app` continues to pass the three-plugin conformance oracle.
+- `fixtures/clean-consumer --workload` exercises the complete typed graph from
+  outside the root workspace in the optimized release profile and rejects
+  gross p99/max latency regressions.
 - The benchmark report records distributions and environment, and documents
   unmeasured dimensions instead of claiming universal optimality.
