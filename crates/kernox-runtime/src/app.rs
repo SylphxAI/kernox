@@ -8,7 +8,7 @@ use std::{
 };
 
 use futures_util::FutureExt;
-use kernox_core::{Binding, GraphBuilder, GraphLimits, PluginId, ResolveError, ResolvedGraph};
+use kernox_core::{Binding, GraphBuilder, GraphLimits, PluginId, ResolvedGraph};
 
 use crate::capability::{Registry, root_capability};
 use crate::observation::default_sink;
