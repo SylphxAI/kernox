@@ -15,6 +15,7 @@ categories.workspace = true
 [dependencies]
 kernox-core.workspace = true
 kernox-runtime = { path = "../kernox-runtime", version = "1.0.0" }
+thiserror.workspace = true
 
 [dev-dependencies]
 futures.workspace = true

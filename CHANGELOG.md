@@ -20,5 +20,7 @@ descriptor/report schema compatibility is versioned separately where stated.
   concurrency regressions for scope closure and long-lived child retention.
 - Indexed consumer/capability requirement lookup during initialization, with
   insertion-order coverage and a dedicated scaling benchmark.
+- North Star conformance oracle for three-plugin source-attributed applications,
+  including clean startup and shutdown proof on the reference app.
 
 [Unreleased]: https://github.com/SylphxAI/kernox/commits/main

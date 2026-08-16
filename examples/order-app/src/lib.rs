@@ -17,6 +17,8 @@ use kernox::{
 use semver::{Version, VersionReq};
 use thiserror::Error;
 
+use kernox::core::PluginSource;
+
 const VERSION: &str = "1.0.0";
 const CLOCK_PLUGIN_ID: &str = "dev.kernox.examples.system-clock";
 const STORE_PLUGIN_ID: &str = "dev.kernox.examples.order-store";
@@ -118,6 +120,7 @@ struct SystemClockPlugin {
 impl SystemClockPlugin {
     fn new() -> Result<Self, ComposeError> {
         let descriptor = PluginDescriptor::new(plugin_id(CLOCK_PLUGIN_ID)?, version()?)
+            .sourced_from(source("kernox-example-system-clock")?)
             .provide(CapabilityOffer::new(capability_id(CLOCK_CAPABILITY_ID)?, version()?))?;
         Ok(Self { descriptor })
     }
@@ -166,6 +169,7 @@ struct OrderStorePlugin {
 impl OrderStorePlugin {
     fn new() -> Result<Self, ComposeError> {
         let descriptor = PluginDescriptor::new(plugin_id(STORE_PLUGIN_ID)?, version()?)
+            .sourced_from(source("kernox-example-order-store")?)
             .provide(CapabilityOffer::new(capability_id(STORE_CAPABILITY_ID)?, version()?))?;
         Ok(Self { descriptor })
     }
@@ -215,6 +219,7 @@ impl OrderServicePlugin {
     fn new() -> Result<Self, ComposeError> {
         let requirement = VersionReq::parse("^1.0")?;
         let descriptor = PluginDescriptor::new(plugin_id(SERVICE_PLUGIN_ID)?, version()?)
+            .sourced_from(source("kernox-example-order-service")?)
             .provide(CapabilityOffer::new(capability_id(SERVICE_CAPABILITY_ID)?, version()?))?
             .require(CapabilityRequirement::exactly_one(
                 capability_id(CLOCK_CAPABILITY_ID)?,
@@ -284,6 +289,10 @@ fn capability_id(value: &str) -> Result<CapabilityId, kernox::core::IdentifierEr
 
 fn version() -> Result<Version, semver::Error> {
     Version::parse(VERSION)
+}
+
+fn source(package: &str) -> Result<PluginSource, kernox::core::DescriptorError> {
+    PluginSource::new(package, Some("https://github.com/SylphxAI/kernox".to_owned()))
 }
 
 fn access_failure(error: kernox::runtime::AccessError) -> PluginError {

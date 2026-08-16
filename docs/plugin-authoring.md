@@ -32,8 +32,8 @@ change. Display names and crate names are not identities.
 ## 2. Declare the plugin graph contract
 
 Construct one immutable `PluginDescriptor` with offers, requirements,
-conflicts, version, and optional source attribution. A single-provider
-ambiguity fails unless the product supplies an explicit `Binding`. Host needs
+conflicts, version, and source attribution. A single-provider ambiguity fails
+unless the product supplies an explicit `Binding`. Host needs
 are ordinary capabilities: a background worker that needs supervised Tokio
 tasks declares `dev.kernox.host.tokio.tasks`; without the host plugin, graph
 resolution fails before readiness.
@@ -76,6 +76,26 @@ those methods part of the kernel.
 
 Removing a plugin means removing its registration and repairing any now-missing
 requirements. It does not imply runtime unloading of native machine code.
+
+## 6. Verify an application
+
+The North Star conformance oracle consumes a resolved application and exercises
+its real initialization, startup, and shutdown path:
+
+```rust,no_run
+use kernox_testkit::verify_application;
+
+# async fn example(app: kernox_runtime::ResolvedApp) {
+let report = verify_application(app).await?;
+assert_eq!(report.plugin_count, 3);
+# Ok::<(), kernox_testkit::ConformanceError>(())
+# }
+```
+
+Conformance requires at least three plugins, complete source attribution, and
+unique source package names. It proves composition and lifecycle behavior; it
+does not by itself prove independent legal ownership, registry publication, or
+deployment.
 
 See [`examples/order-app/src/lib.rs`](../examples/order-app/src/lib.rs) for a
 three-plugin implementation used unchanged by two Hosts.

@@ -16,5 +16,9 @@ semver.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
 
+[dev-dependencies]
+futures.workspace = true
+kernox-testkit = { path = "../../crates/kernox-testkit", version = "1.0.0" }
+
 [lints]
 workspace = true

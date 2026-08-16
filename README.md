@@ -32,7 +32,8 @@ shutdown:    quiesce -> stop -> dispose in reverse dependency order
 - supervised Tokio tasks with cancellation, panic fail-closed reporting,
   bounded drain, leak naming, and forced abort after the declared budget;
 - provider-neutral warm serverless apps with a fresh scope per invocation;
-- `cargo kernox` graph validation/rendering and a deterministic testkit; and
+- `cargo kernox` graph validation/rendering, a deterministic testkit, and a
+  North Star conformance oracle for verified three-plugin applications; and
 - dual licensing, locked verification, advisory/license/source policy, fuzzing,
   benchmarks, MSRV checks, cross-platform CI, and trusted-publishing automation.
 

@@ -1,11 +1,17 @@
 //! Deterministic lifecycle observation and failure injection for plugin tests.
 
+mod conformance;
+
 use std::sync::{Arc, Mutex};
 
 use kernox_core::{PluginDescriptor, PluginId};
 use kernox_runtime::{
     BoxFuture, InitializationContext, LifecycleContext, LifecycleObservation, LifecycleOutcome,
     LifecyclePhase, ObservationSink, Plugin, PluginError, ProvisionSet, ScopeId,
+};
+
+pub use conformance::{
+    ConformanceError, ConformanceReport, MINIMUM_VERIFIED_PLUGINS, verify_application,
 };
 
 /// Duration-free lifecycle event suitable for deterministic assertions.
