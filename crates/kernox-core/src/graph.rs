@@ -765,6 +765,10 @@ mod tests {
         VersionReq::parse("^1.0").unwrap()
     }
 
+    fn chain_capability(value: u16) -> CapabilityId {
+        capability(&format!("dev.example.cap{value}"))
+    }
+
     fn assert_resolve_tag(builder: GraphBuilder, expected: &str) {
         assert_eq!(builder.resolve().unwrap_err().tag(), expected);
     }
@@ -907,6 +911,45 @@ mod tests {
 
         assert_eq!(forward.report(), reverse.report());
         assert!(reverse.requirement(&plugin("dev.example.consumer"), &clock).is_some());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn graph_report_serializes_a_semantic_golden() {
+        let clock = capability("dev.example.clock");
+        let provider = PluginDescriptor::new(plugin("dev.example.clock"), version())
+            .provide(CapabilityOffer::new(clock.clone(), version()))
+            .unwrap();
+        let consumer = PluginDescriptor::new(plugin("dev.example.orders"), version())
+            .require(CapabilityRequirement::exactly_one(clock, requirement()))
+            .unwrap();
+
+        let report =
+            GraphBuilder::new().plugin(consumer).plugin(provider).resolve().unwrap().report();
+        let actual = serde_json::to_value(report).unwrap();
+        let expected = serde_json::json!({
+            "schema_version": 1,
+            "plugins": [
+                {"id": "dev.example.clock", "version": "1.0.0"},
+                {"id": "dev.example.orders", "version": "1.0.0"}
+            ],
+            "requirements": [{
+                "consumer": "dev.example.orders",
+                "capability": "dev.example.clock",
+                "cardinality": "ExactlyOne",
+                "providers": ["dev.example.clock"]
+            }],
+            "edges": [{
+                "provider": "dev.example.clock",
+                "consumer": "dev.example.orders",
+                "capability": "dev.example.clock"
+            }],
+            "diagnostics": [],
+            "startup_order": ["dev.example.clock", "dev.example.orders"],
+            "teardown_order": ["dev.example.orders", "dev.example.clock"]
+        });
+
+        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -1148,6 +1191,55 @@ mod tests {
                 .unwrap();
 
             prop_assert_eq!(forward.report(), reverse.report());
+        }
+
+        #[test]
+        fn dependency_chain_order_is_insertion_invariant(values in prop::collection::btree_set(0_u16..500, 1..64)) {
+            let values: Vec<_> = values.into_iter().collect();
+            let descriptors: Vec<_> = values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    let descriptor = PluginDescriptor::new(
+                        plugin(&format!("dev.example.p{value}")),
+                        version(),
+                    );
+                    let descriptor = if index == 0 {
+                        descriptor
+                    } else {
+                        descriptor
+                            .require(CapabilityRequirement::exactly_one(
+                                chain_capability(values[index - 1]),
+                                requirement(),
+                            ))
+                            .unwrap()
+                    };
+                    descriptor
+                        .provide(CapabilityOffer::new(chain_capability(*value), version()))
+                        .unwrap()
+                })
+                .collect();
+
+            let forward = descriptors
+                .iter()
+                .cloned()
+                .fold(GraphBuilder::new(), GraphBuilder::plugin)
+                .resolve()
+                .unwrap();
+            let reverse = descriptors
+                .iter()
+                .rev()
+                .cloned()
+                .fold(GraphBuilder::new(), GraphBuilder::plugin)
+                .resolve()
+                .unwrap();
+
+            prop_assert_eq!(forward.report(), reverse.report());
+            for window in values.windows(2) {
+                let consumer = plugin(&format!("dev.example.p{}", window[1]));
+                let capability = chain_capability(window[0]);
+                prop_assert!(forward.requirement(&consumer, &capability).is_some());
+            }
         }
     }
 }
