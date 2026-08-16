@@ -196,6 +196,17 @@ impl Registry {
 }
 
 /// Non-owning resolver available only while one plugin initializes.
+///
+/// The resolver is borrowed for one `initialize` call. Supported APIs do not
+/// let it escape as `'static`.
+///
+/// ```compile_fail
+/// use kernox_runtime::InitializationContext;
+///
+/// fn leak(ctx: InitializationContext<'_>) -> InitializationContext<'static> {
+///     ctx
+/// }
+/// ```
 pub struct InitializationContext<'a> {
     consumer: &'a PluginId,
     graph: &'a ResolvedGraph,
