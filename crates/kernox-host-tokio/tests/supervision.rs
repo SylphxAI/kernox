@@ -283,6 +283,28 @@ fn malformed_names_and_missing_runtime_fail_without_spawning() {
 }
 
 #[test]
+fn closed_admission_precedes_runtime_lookup() {
+    let mut app = futures::executor::block_on(async {
+        AppBuilder::new()
+            .host_capability(tokio_runtime_capability().unwrap())
+            .plugin(TokioTaskPlugin::new(TokioTaskConfig::default()).unwrap())
+            .resolve()
+            .unwrap()
+            .start()
+            .await
+            .unwrap()
+    });
+    let tasks =
+        app.capability_from::<TokioTasksCapability>(&tokio_task_plugin_id().unwrap()).unwrap();
+    futures::executor::block_on(app.shutdown());
+
+    assert_eq!(
+        tasks.spawn(TaskName::new("after-shutdown").unwrap(), Box::pin(async {})).unwrap_err(),
+        SpawnError::Closed
+    );
+}
+
+#[test]
 fn host_runtime_requirement_fails_before_readiness_and_checks_version() {
     let missing = TokioTaskPlugin::new(TokioTaskConfig::default()).unwrap();
     let error = AppBuilder::new().plugin(missing).resolve().err().expect("host must be declared");

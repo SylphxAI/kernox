@@ -448,11 +448,11 @@ impl TaskSupervisor {
 
 impl TokioTasks for TaskSupervisor {
     fn spawn(&self, name: TaskName, future: BoxFuture<'static, ()>) -> Result<TaskId, SpawnError> {
-        let handle = Handle::try_current().map_err(|_| SpawnError::NoRuntime)?;
         let mut state = self.inner.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !state.accepting {
             return Err(SpawnError::Closed);
         }
+        let handle = Handle::try_current().map_err(|_| SpawnError::NoRuntime)?;
         if state.tasks.len() >= self.inner.config.max_tasks {
             return Err(SpawnError::Capacity);
         }

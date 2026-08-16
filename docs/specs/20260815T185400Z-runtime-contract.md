@@ -101,7 +101,8 @@ package that owns those resources.
   after forced abort has destroyed their tracked futures. Task labels used in
   those reports reject control, bidi, and zero-width format characters. The
   same drain and failure reporting applies when initialization rollback reaches
-  the host's dispose hook before readiness.
+  the host's dispose hook before readiness. A quiesced supervisor rejects new
+  task admission before consulting the ambient Tokio runtime.
 - The deterministic testkit records lifecycle order and injects typed failures
   without network or process signals; domain clocks remain ordinary test
   capabilities rather than kernel policy.
