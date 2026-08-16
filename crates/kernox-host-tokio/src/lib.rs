@@ -237,6 +237,14 @@ impl Plugin for TokioTaskPlugin {
         &'a mut self,
         _context: InitializationContext<'a>,
     ) -> BoxFuture<'a, Result<ProvisionSet, PluginError>> {
+        if Handle::try_current().is_err() {
+            return Box::pin(async {
+                Err(PluginError::new(
+                    SpawnError::NoRuntime.tag(),
+                    SpawnError::NoRuntime.to_string(),
+                ))
+            });
+        }
         let supervisor = Arc::new(TaskSupervisor::new(self.config));
         self.supervisor = Some(Arc::clone(&supervisor));
         let interface: Arc<dyn TokioTasks> = supervisor;

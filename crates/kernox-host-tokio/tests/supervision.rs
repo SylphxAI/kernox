@@ -257,12 +257,16 @@ async fn initialization_rollback_drains_tasks_before_returning() {
 }
 
 #[test]
-fn malformed_names_and_missing_runtime_fail_without_spawning() {
+fn malformed_names_reject_control_and_format_characters() {
     assert_eq!(TaskName::new("").unwrap_err(), SpawnError::InvalidName);
     assert_eq!(TaskName::new("worker\u{202e}name").unwrap_err(), SpawnError::InvalidName);
     assert_eq!(TaskName::new("worker\u{200b}name").unwrap_err(), SpawnError::InvalidName);
+}
+
+#[test]
+fn missing_tokio_runtime_fails_before_readiness() {
     let plugin = TokioTaskPlugin::new(TokioTaskConfig::default()).unwrap();
-    let app = futures::executor::block_on(async {
+    let failure = futures::executor::block_on(async {
         AppBuilder::new()
             .host_capability(tokio_runtime_capability().unwrap())
             .plugin(plugin)
@@ -270,10 +274,31 @@ fn malformed_names_and_missing_runtime_fail_without_spawning() {
             .unwrap()
             .start()
             .await
-            .unwrap()
+            .err()
+            .expect("Tokio host must not become ready without a runtime")
     });
-    let tasks =
-        app.capability_from::<TokioTasksCapability>(&tokio_task_plugin_id().unwrap()).unwrap();
+
+    assert_eq!(failure.primary.error_tag, "tokio-task.no-runtime");
+    assert!(failure.cleanup_failures.is_empty());
+}
+
+#[test]
+fn task_spawn_reports_missing_runtime_after_ready_app() {
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+    let (_app, tasks) = runtime.block_on(async {
+        let app = AppBuilder::new()
+            .host_capability(tokio_runtime_capability().unwrap())
+            .plugin(TokioTaskPlugin::new(TokioTaskConfig::default()).unwrap())
+            .resolve()
+            .unwrap()
+            .start()
+            .await
+            .unwrap();
+        let tasks =
+            app.capability_from::<TokioTasksCapability>(&tokio_task_plugin_id().unwrap()).unwrap();
+        (app, tasks)
+    });
+    drop(runtime);
 
     assert_eq!(
         tasks.spawn(TaskName::new("outside-runtime").unwrap(), Box::pin(async {})).unwrap_err(),
@@ -284,7 +309,8 @@ fn malformed_names_and_missing_runtime_fail_without_spawning() {
 
 #[test]
 fn closed_admission_precedes_runtime_lookup() {
-    let mut app = futures::executor::block_on(async {
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+    let (mut app, tasks) = runtime.block_on(async {
         AppBuilder::new()
             .host_capability(tokio_runtime_capability().unwrap())
             .plugin(TokioTaskPlugin::new(TokioTaskConfig::default()).unwrap())
@@ -292,11 +318,16 @@ fn closed_admission_precedes_runtime_lookup() {
             .unwrap()
             .start()
             .await
+            .map(|app| {
+                let tasks = app
+                    .capability_from::<TokioTasksCapability>(&tokio_task_plugin_id().unwrap())
+                    .unwrap();
+                (app, tasks)
+            })
             .unwrap()
     });
-    let tasks =
-        app.capability_from::<TokioTasksCapability>(&tokio_task_plugin_id().unwrap()).unwrap();
-    futures::executor::block_on(app.shutdown());
+    runtime.block_on(app.shutdown());
+    drop(runtime);
 
     assert_eq!(
         tasks.spawn(TaskName::new("after-shutdown").unwrap(), Box::pin(async {})).unwrap_err(),
