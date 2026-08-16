@@ -1,0 +1,24 @@
+[package]
+name = "kernox-example-checkout-app"
+description = "Provider-binding checkout example for Kernox"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+publish = false
+
+[dependencies]
+futures.workspace = true
+kernox = { path = "../../crates/kernox", version = "0.1.0" }
+semver.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+kernox-testkit = { path = "../../crates/kernox-testkit", version = "0.1.0" }
+
+[lints]
+workspace = true

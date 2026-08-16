@@ -9,7 +9,9 @@ members = [
     "crates/kernox-host-tokio",
     "crates/kernox-runtime",
     "crates/kernox-testkit",
+    "examples/checkout-app",
     "examples/order-app",
+    "examples/worker-app",
     "xtask",
 ]
 

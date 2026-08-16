@@ -53,14 +53,22 @@ services. Native plugins are trusted in-process Rust code, not a sandbox.
 | `kernox-testkit` | Duration-free recorder and lifecycle failure probes |
 | `cargo-kernox` | Bounded JSON validation and JSON/DOT graph inspection |
 
-The [order reference application](examples/order-app) composes three unchanged
-domain plugins under both long-lived and serverless hosts.
+The examples cover distinct composition shapes:
+
+- [order-app](examples/order-app) reuses one domain graph under long-lived and
+  warm serverless hosts;
+- [checkout-app](examples/checkout-app) swaps two payment adapters through an
+  explicit binding without changing the checkout domain; and
+- [worker-app](examples/worker-app) delegates a named background task to the
+  supervised Tokio host and drains it on shutdown.
 
 ## Try the source candidate
 
 ```bash
 cargo run -p kernox-example-order-app --bin long_lived
 cargo run -p kernox-example-order-app --bin serverless
+cargo run -p kernox-example-checkout-app --bin checkout -- wallet
+cargo run -p kernox-example-worker-app --bin worker
 cargo run -p cargo-kernox -- kernox check fixtures/compositions/valid.json
 cargo run -p cargo-kernox -- kernox graph fixtures/compositions/valid.json --format dot
 ```

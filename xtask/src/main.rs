@@ -69,6 +69,18 @@ fn verify() -> Result<(), String> {
         &["run", "--locked", "-p", "kernox-example-order-app", "--bin", "serverless"],
         &[],
     )?;
+    run(
+        "checkout-example",
+        "cargo",
+        &["run", "--locked", "-p", "kernox-example-checkout-app", "--bin", "checkout"],
+        &[],
+    )?;
+    run(
+        "worker-example",
+        "cargo",
+        &["run", "--locked", "-p", "kernox-example-worker-app", "--bin", "worker"],
+        &[],
+    )?;
     run("dependency-policy", "cargo", &["deny", "check"], &[])?;
     run("advisories", "cargo", &["audit", "--deny", "warnings"], &[])?;
     run("core-package", "cargo", &["package", "--locked", "-p", "kernox-core"], &[])?;

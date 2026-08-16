@@ -505,12 +505,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "kernox-example-checkout-app"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "kernox",
+ "kernox-testkit",
+ "semver",
+ "thiserror",
+]
+
+[[package]]
 name = "kernox-example-order-app"
 version = "0.1.0"
 dependencies = [
  "futures",
  "kernox",
  "kernox-testkit",
+ "semver",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "kernox-example-worker-app"
+version = "0.1.0"
+dependencies = [
+ "kernox",
  "semver",
  "thiserror",
  "tokio",
