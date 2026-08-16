@@ -101,6 +101,19 @@ fn verify() -> Result<(), String> {
         ],
         &[],
     )?;
+    run(
+        "clean-consumer-serverless",
+        "cargo",
+        &[
+            "run",
+            "--locked",
+            "--manifest-path",
+            "fixtures/clean-consumer/Cargo.toml",
+            "--",
+            "--serverless",
+        ],
+        &[],
+    )?;
     run("dependency-policy", "cargo", &["deny", "check"], &[])?;
     run("advisories", "cargo", &["audit", "--deny", "warnings"], &[])?;
     run("core-package", "cargo", &["package", "--locked", "-p", "kernox-core"], &[])?;

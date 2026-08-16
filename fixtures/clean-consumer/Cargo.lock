@@ -95,6 +95,7 @@ name = "kernox"
 version = "0.1.0"
 dependencies = [
  "kernox-core",
+ "kernox-host-serverless",
  "kernox-runtime",
 ]
 
@@ -113,6 +114,15 @@ name = "kernox-core"
 version = "0.1.0"
 dependencies = [
  "semver",
+ "thiserror",
+]
+
+[[package]]
+name = "kernox-host-serverless"
+version = "0.1.0"
+dependencies = [
+ "kernox-core",
+ "kernox-runtime",
  "thiserror",
 ]
 

@@ -21,6 +21,17 @@ development oracle rejects p99 above 5 ms or any call above 100 ms. These are
 short-run regression guardrails for this fixture, not a universal service-level
 objective or a sustained-load claim.
 
+The same standalone consumer can exercise the provider-neutral warm host:
+
+```text
+cargo run --locked --manifest-path fixtures/clean-consumer/Cargo.toml -- --serverless
+```
+
+This path checks capacity rejection, handler-error cleanup, fresh invocation
+scope identities parented to the warm application, clean shutdown, and closed
+post-shutdown admission. It is host/lifecycle evidence, not deployment or live
+adoption evidence.
+
 Passing this fixture proves source-level consumer integration. It does not
 prove registry publication, independent legal ownership, deployment, or live
 adoption; those remain separate North Star facts.
