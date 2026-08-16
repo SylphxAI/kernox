@@ -25,4 +25,10 @@ evidence are mature.
 - North Star conformance oracle for three-plugin source-attributed applications,
   including clean startup and shutdown proof on the reference app.
 
+### Fixed
+
+- Plugin hook and observation-sink unwinds no longer abort remaining lifecycle
+  rollback. The executor reports `plugin.hook-panicked` without a panic payload
+  and continues reverse cleanup.
+
 [Unreleased]: https://github.com/SylphxAI/kernox/commits/main

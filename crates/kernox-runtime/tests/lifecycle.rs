@@ -1,6 +1,6 @@
 //! End-to-end lifecycle, provisioning, and rollback contract tests.
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use std::sync::{
     Arc, Mutex,
@@ -12,8 +12,8 @@ use kernox_core::{
     CapabilityId, CapabilityOffer, CapabilityRequirement, PluginDescriptor, PluginId,
 };
 use kernox_runtime::{
-    AppBuilder, BoxFuture, Capability, InitializationContext, LifecycleContext, Plugin,
-    PluginError, ProvisionSet,
+    AppBuilder, BoxFuture, Capability, InitializationContext, LifecycleContext,
+    LifecycleObservation, ObservationSink, Plugin, PluginError, ProvisionSet,
 };
 use semver::{Version, VersionReq};
 
@@ -500,6 +500,216 @@ fn concurrent_invocations_receive_unique_scopes_with_the_app_as_parent() {
             assert_eq!(identities.len(), 64);
             assert_eq!(unique.len(), 64);
         }
+        assert!(app.shutdown().await.is_clean());
+    });
+}
+
+#[derive(Clone, Copy)]
+enum PanicHook {
+    InitializeSync,
+    InitializeAsync,
+    Start,
+    Dispose,
+}
+
+struct PanicPlugin {
+    descriptor: PluginDescriptor,
+    events: Arc<Mutex<Vec<String>>>,
+    hook: PanicHook,
+}
+
+impl PanicPlugin {
+    fn new(id: &str, events: Arc<Mutex<Vec<String>>>, hook: PanicHook) -> Self {
+        Self { descriptor: PluginDescriptor::new(plugin_id(id), version()), events, hook }
+    }
+}
+
+impl Plugin for PanicPlugin {
+    fn descriptor(&self) -> &PluginDescriptor {
+        &self.descriptor
+    }
+
+    fn initialize<'a>(
+        &'a mut self,
+        _context: InitializationContext<'a>,
+    ) -> BoxFuture<'a, Result<ProvisionSet, PluginError>> {
+        record(&self.events, "panic.initialize");
+        match self.hook {
+            PanicHook::InitializeSync => panic!("injected initialize panic"),
+            PanicHook::InitializeAsync => Box::pin(async { panic!("injected initialize panic") }),
+            PanicHook::Start | PanicHook::Dispose => Box::pin(async { Ok(ProvisionSet::new()) }),
+        }
+    }
+
+    fn start<'a>(
+        &'a mut self,
+        _context: LifecycleContext<'a>,
+    ) -> BoxFuture<'a, Result<(), PluginError>> {
+        record(&self.events, "panic.start");
+        if matches!(self.hook, PanicHook::Start) {
+            Box::pin(async { panic!("injected start panic") })
+        } else {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    fn dispose<'a>(
+        &'a mut self,
+        _context: LifecycleContext<'a>,
+    ) -> BoxFuture<'a, Result<(), PluginError>> {
+        record(&self.events, "panic.dispose");
+        if matches!(self.hook, PanicHook::Dispose) {
+            Box::pin(async { panic!("injected dispose panic") })
+        } else {
+            Box::pin(async { Ok(()) })
+        }
+    }
+}
+
+struct PanicSink;
+
+impl ObservationSink for PanicSink {
+    fn record(&self, _observation: LifecycleObservation) {
+        panic!("injected observation sink panic");
+    }
+}
+
+#[test]
+fn initialize_hook_unwind_rolls_back_already_initialized_plugins() {
+    block_on(async {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let error = AppBuilder::new()
+            .plugin(ClockPlugin::new(Arc::clone(&events)))
+            .plugin(PanicPlugin::new(
+                "dev.example.panic-plugin",
+                Arc::clone(&events),
+                PanicHook::InitializeAsync,
+            ))
+            .resolve()
+            .unwrap()
+            .start()
+            .await
+            .err()
+            .expect("initialize unwind must become a lifecycle failure");
+
+        assert_eq!(error.primary.error_tag, "plugin.hook-panicked");
+        assert!(error.cleanup_failures.is_empty());
+        assert_eq!(
+            snapshot(&events),
+            ["clock.initialize", "panic.initialize", "panic.dispose", "clock.dispose"]
+        );
+    });
+}
+
+#[test]
+fn initialize_builder_unwind_is_isolated_like_hook_unwind() {
+    block_on(async {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let error = AppBuilder::new()
+            .plugin(ClockPlugin::new(Arc::clone(&events)))
+            .plugin(PanicPlugin::new(
+                "dev.example.panic-plugin",
+                Arc::clone(&events),
+                PanicHook::InitializeSync,
+            ))
+            .resolve()
+            .unwrap()
+            .start()
+            .await
+            .err()
+            .expect("sync initialize panic must become a lifecycle failure");
+
+        assert_eq!(error.primary.error_tag, "plugin.hook-panicked");
+        assert_eq!(
+            snapshot(&events),
+            ["clock.initialize", "panic.initialize", "panic.dispose", "clock.dispose"]
+        );
+    });
+}
+
+#[test]
+fn start_hook_unwind_runs_reverse_cleanup() {
+    block_on(async {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let error = AppBuilder::new()
+            .plugin(ClockPlugin::new(Arc::clone(&events)))
+            .plugin(PanicPlugin::new(
+                "dev.example.panic-plugin",
+                Arc::clone(&events),
+                PanicHook::Start,
+            ))
+            .resolve()
+            .unwrap()
+            .start()
+            .await
+            .err()
+            .expect("start unwind must become a lifecycle failure");
+
+        assert_eq!(error.primary.error_tag, "plugin.hook-panicked");
+        assert_eq!(
+            snapshot(&events),
+            [
+                "clock.initialize",
+                "panic.initialize",
+                "clock.start",
+                "panic.start",
+                "clock.quiesce",
+                "clock.stop",
+                "panic.dispose",
+                "clock.dispose",
+            ]
+        );
+    });
+}
+
+#[test]
+fn cleanup_hook_unwind_continues_later_hooks() {
+    block_on(async {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut app = AppBuilder::new()
+            .plugin(ClockPlugin::new(Arc::clone(&events)))
+            .plugin(PanicPlugin::new(
+                "dev.example.panic-plugin",
+                Arc::clone(&events),
+                PanicHook::Dispose,
+            ))
+            .resolve()
+            .unwrap()
+            .start()
+            .await
+            .unwrap();
+
+        let report = app.shutdown().await;
+        assert_eq!(report.failures.len(), 1);
+        assert_eq!(report.failures[0].error_tag, "plugin.hook-panicked");
+        assert_eq!(
+            snapshot(&events),
+            [
+                "clock.initialize",
+                "panic.initialize",
+                "clock.start",
+                "panic.start",
+                "clock.quiesce",
+                "clock.stop",
+                "panic.dispose",
+                "clock.dispose",
+            ]
+        );
+    });
+}
+
+#[test]
+fn observation_sink_unwind_does_not_abort_lifecycle() {
+    block_on(async {
+        let mut app = AppBuilder::new()
+            .plugin(ClockPlugin::new(Arc::new(Mutex::new(Vec::new()))))
+            .observation_sink(Arc::new(PanicSink))
+            .resolve()
+            .unwrap()
+            .start()
+            .await
+            .expect("a panicking sink must not abort startup");
+
         assert!(app.shutdown().await.is_clean());
     });
 }

@@ -58,13 +58,17 @@ initializing|starting -> rolling-back -> disposed-with-failure
 
 The consuming `ResolvedApp -> RunningApp` API makes invalid startup transitions
 unrepresentable; shutdown caches one terminal report. Expected hook failures
-return typed errors. Panics in trusted native plugin hooks are outside the
-transactional rollback guarantee unless the Host has a separate isolation
-boundary; Kernox does not promise unwind-safe containment.
+return typed errors. If a plugin hook function or its future unwinds, the
+lifecycle executor converts that unwind into a typed `plugin.hook-panicked`
+failure without retaining the panic payload, then follows the same rollback or
+continued-cleanup path as an expected error. Observation sink unwinds are
+discarded so they cannot abort remaining hooks. This is lifecycle-executor
+supervision, not plugin isolation or process-wide unwind containment.
 
 Rollback records the primary failure and every cleanup failure without losing
-either. Cleanup continues after an individual cleanup error. A repeated
-shutdown returns the prior terminal report and performs no second effect.
+either. Cleanup continues after an individual cleanup error or hook unwind. A
+repeated shutdown returns the prior terminal report and performs no second
+effect.
 
 ## Scope contract
 

@@ -1,5 +1,9 @@
-use std::{collections::BTreeMap, marker::PhantomData, sync::Arc, time::Instant};
+use std::{
+    collections::BTreeMap, future::Future, marker::PhantomData, panic::AssertUnwindSafe, sync::Arc,
+    time::Instant,
+};
 
+use futures_util::FutureExt;
 use kernox_core::{Binding, GraphBuilder, GraphLimits, PluginId, ResolveError, ResolvedGraph};
 
 use crate::capability::{Registry, root_capability};
@@ -112,99 +116,8 @@ impl ResolvedApp {
     pub async fn start(mut self) -> Result<RunningApp, LifecycleFailure> {
         let order = self.graph.startup_order().to_vec();
         let mut registry = Registry::default();
-        let mut initialized = Vec::with_capacity(order.len());
-
-        for plugin_id in &order {
-            let started_at = Instant::now();
-            let graph = Arc::clone(&self.graph);
-            let scope = self.scope.clone();
-            let result = {
-                let plugin = self.plugin_mut(plugin_id);
-                plugin
-                    .initialize(InitializationContext::new(
-                        plugin_id,
-                        &graph,
-                        &registry,
-                        scope.view(),
-                    ))
-                    .await
-            };
-
-            let staged = match result {
-                Ok(staged) => staged,
-                Err(error) => {
-                    self.observe_failure(
-                        plugin_id,
-                        LifecyclePhase::Initialize,
-                        started_at,
-                        safe_tag(error.tag()),
-                    );
-                    let primary = plugin_failure(plugin_id, LifecyclePhase::Initialize, &error);
-                    let mut rollback = initialized;
-                    rollback.push(plugin_id.clone());
-                    let cleanup_failures =
-                        self.cleanup(&rollback, &[LifecyclePhase::Dispose]).await;
-                    self.close_scope();
-                    return Err(LifecycleFailure { primary, cleanup_failures });
-                }
-            };
-
-            let descriptor = self
-                .graph
-                .plugin(plugin_id)
-                .unwrap_or_else(|| unreachable!("startup order contains only resolved plugins"));
-            if let Err(error) = registry.commit(plugin_id, descriptor, staged) {
-                self.observe_failure(
-                    plugin_id,
-                    LifecyclePhase::Initialize,
-                    started_at,
-                    error.tag(),
-                );
-                let primary = FailureRecord {
-                    phase: LifecyclePhase::Initialize,
-                    plugin: plugin_id.clone(),
-                    error_tag: error.tag(),
-                    message: error.to_string(),
-                };
-                let mut rollback = initialized;
-                rollback.push(plugin_id.clone());
-                let cleanup_failures = self.cleanup(&rollback, &[LifecyclePhase::Dispose]).await;
-                self.close_scope();
-                return Err(LifecycleFailure { primary, cleanup_failures });
-            }
-
-            self.observe_success(plugin_id, LifecyclePhase::Initialize, started_at);
-            initialized.push(plugin_id.clone());
-        }
-
-        let mut started = Vec::with_capacity(order.len());
-        for plugin_id in &order {
-            let started_at = Instant::now();
-            let scope = self.scope.clone();
-            let result =
-                self.plugin_mut(plugin_id).start(LifecycleContext::new(scope.view())).await;
-            match &result {
-                Ok(()) => self.observe_success(plugin_id, LifecyclePhase::Start, started_at),
-                Err(error) => self.observe_failure(
-                    plugin_id,
-                    LifecyclePhase::Start,
-                    started_at,
-                    safe_tag(error.tag()),
-                ),
-            }
-            if let Err(error) = result {
-                let primary = plugin_failure(plugin_id, LifecyclePhase::Start, &error);
-                let mut affected = started;
-                affected.push(plugin_id.clone());
-                let mut cleanup_failures =
-                    self.cleanup(&affected, &[LifecyclePhase::Quiesce, LifecyclePhase::Stop]).await;
-                cleanup_failures
-                    .extend(self.cleanup(&initialized, &[LifecyclePhase::Dispose]).await);
-                self.close_scope();
-                return Err(LifecycleFailure { primary, cleanup_failures });
-            }
-            started.push(plugin_id.clone());
-        }
+        let initialized = self.initialize_all(&order, &mut registry).await?;
+        self.start_all(&order, &initialized).await?;
 
         Ok(RunningApp {
             graph: self.graph,
@@ -214,6 +127,144 @@ impl ResolvedApp {
             scope: self.scope,
             terminal: None,
         })
+    }
+
+    async fn initialize_all(
+        &mut self,
+        order: &[PluginId],
+        registry: &mut Registry,
+    ) -> Result<Vec<PluginId>, LifecycleFailure> {
+        let mut initialized = Vec::with_capacity(order.len());
+        for plugin_id in order {
+            self.initialize_one(plugin_id, registry, &initialized).await?;
+            initialized.push(plugin_id.clone());
+        }
+        Ok(initialized)
+    }
+
+    async fn initialize_one(
+        &mut self,
+        plugin_id: &PluginId,
+        registry: &mut Registry,
+        initialized: &[PluginId],
+    ) -> Result<(), LifecycleFailure> {
+        let started_at = Instant::now();
+        let graph = Arc::clone(&self.graph);
+        let scope = self.scope.clone();
+        let result = {
+            let plugin = self.plugin_mut(plugin_id);
+            run_plugin_hook(|| {
+                plugin.initialize(InitializationContext::new(
+                    plugin_id,
+                    &graph,
+                    registry,
+                    scope.view(),
+                ))
+            })
+            .await
+        };
+
+        let staged = match result {
+            Ok(staged) => staged,
+            Err(error) => {
+                return Err(self
+                    .rollback_initialize(
+                        plugin_id,
+                        started_at,
+                        safe_tag(error.tag()),
+                        plugin_failure(plugin_id, LifecyclePhase::Initialize, &error),
+                        initialized,
+                    )
+                    .await);
+            }
+        };
+
+        let descriptor = self
+            .graph
+            .plugin(plugin_id)
+            .unwrap_or_else(|| unreachable!("startup order contains only resolved plugins"));
+        if let Err(error) = registry.commit(plugin_id, descriptor, staged) {
+            return Err(self
+                .rollback_initialize(
+                    plugin_id,
+                    started_at,
+                    error.tag(),
+                    FailureRecord {
+                        phase: LifecyclePhase::Initialize,
+                        plugin: plugin_id.clone(),
+                        error_tag: error.tag(),
+                        message: error.to_string(),
+                    },
+                    initialized,
+                )
+                .await);
+        }
+
+        self.observe_success(plugin_id, LifecyclePhase::Initialize, started_at);
+        Ok(())
+    }
+
+    async fn rollback_initialize(
+        &mut self,
+        plugin_id: &PluginId,
+        started_at: Instant,
+        error_tag: &'static str,
+        primary: FailureRecord,
+        initialized: &[PluginId],
+    ) -> LifecycleFailure {
+        self.observe_failure(plugin_id, LifecyclePhase::Initialize, started_at, error_tag);
+        let mut rollback = initialized.to_vec();
+        rollback.push(plugin_id.clone());
+        let cleanup_failures = self.cleanup(&rollback, &[LifecyclePhase::Dispose]).await;
+        self.close_scope();
+        LifecycleFailure { primary, cleanup_failures }
+    }
+
+    async fn start_all(
+        &mut self,
+        order: &[PluginId],
+        initialized: &[PluginId],
+    ) -> Result<(), LifecycleFailure> {
+        let mut started = Vec::with_capacity(order.len());
+        for plugin_id in order {
+            self.start_one(plugin_id, &started, initialized).await?;
+            started.push(plugin_id.clone());
+        }
+        Ok(())
+    }
+
+    async fn start_one(
+        &mut self,
+        plugin_id: &PluginId,
+        started: &[PluginId],
+        initialized: &[PluginId],
+    ) -> Result<(), LifecycleFailure> {
+        let started_at = Instant::now();
+        let scope = self.scope.clone();
+        let result = {
+            let plugin = self.plugin_mut(plugin_id);
+            run_plugin_hook(|| plugin.start(LifecycleContext::new(scope.view()))).await
+        };
+        match &result {
+            Ok(()) => self.observe_success(plugin_id, LifecyclePhase::Start, started_at),
+            Err(error) => self.observe_failure(
+                plugin_id,
+                LifecyclePhase::Start,
+                started_at,
+                safe_tag(error.tag()),
+            ),
+        }
+        if let Err(error) = result {
+            let primary = plugin_failure(plugin_id, LifecyclePhase::Start, &error);
+            let mut affected = started.to_vec();
+            affected.push(plugin_id.clone());
+            let mut cleanup_failures =
+                self.cleanup(&affected, &[LifecyclePhase::Quiesce, LifecyclePhase::Stop]).await;
+            cleanup_failures.extend(self.cleanup(initialized, &[LifecyclePhase::Dispose]).await);
+            self.close_scope();
+            return Err(LifecycleFailure { primary, cleanup_failures });
+        }
+        Ok(())
     }
 
     fn plugin_mut(&mut self, plugin: &PluginId) -> &mut Box<dyn Plugin> {
@@ -256,13 +307,16 @@ impl ResolvedApp {
     }
 
     fn observe_success(&self, plugin: &PluginId, phase: LifecyclePhase, started_at: Instant) {
-        self.observer.record(LifecycleObservation {
-            plugin: plugin.clone(),
-            scope: self.scope.view().id(),
-            phase,
-            outcome: LifecycleOutcome::Succeeded,
-            duration: started_at.elapsed(),
-        });
+        emit_observation(
+            self.observer.as_ref(),
+            LifecycleObservation {
+                plugin: plugin.clone(),
+                scope: self.scope.view().id(),
+                phase,
+                outcome: LifecycleOutcome::Succeeded,
+                duration: started_at.elapsed(),
+            },
+        );
     }
 
     fn observe_failure(
@@ -272,13 +326,16 @@ impl ResolvedApp {
         started_at: Instant,
         error_tag: &'static str,
     ) {
-        self.observer.record(LifecycleObservation {
-            plugin: plugin.clone(),
-            scope: self.scope.view().id(),
-            phase,
-            outcome: LifecycleOutcome::Failed { error_tag },
-            duration: started_at.elapsed(),
-        });
+        emit_observation(
+            self.observer.as_ref(),
+            LifecycleObservation {
+                plugin: plugin.clone(),
+                scope: self.scope.view().id(),
+                phase,
+                outcome: LifecycleOutcome::Failed { error_tag },
+                duration: started_at.elapsed(),
+            },
+        );
     }
 
     fn close_scope(&self) {
@@ -424,26 +481,53 @@ async fn run_cleanup_hook(
 ) -> Result<(), FailureRecord> {
     let started_at = Instant::now();
     let context = LifecycleContext::new(scope);
-    let result = match phase {
-        LifecyclePhase::Quiesce => plugin.quiesce(context).await,
-        LifecyclePhase::Stop => plugin.stop(context).await,
-        LifecyclePhase::Dispose => plugin.dispose(context).await,
+    let result = run_plugin_hook(|| match phase {
+        LifecyclePhase::Quiesce => plugin.quiesce(context),
+        LifecyclePhase::Stop => plugin.stop(context),
+        LifecyclePhase::Dispose => plugin.dispose(context),
         LifecyclePhase::Initialize | LifecyclePhase::Start => {
             unreachable!("cleanup only invokes quiesce, stop, and dispose")
         }
-    };
+    })
+    .await;
     let outcome = match &result {
         Ok(()) => LifecycleOutcome::Succeeded,
         Err(error) => LifecycleOutcome::Failed { error_tag: safe_tag(error.tag()) },
     };
-    observer.record(LifecycleObservation {
-        plugin: plugin_id.clone(),
-        scope: scope.id(),
-        phase,
-        outcome,
-        duration: started_at.elapsed(),
-    });
+    emit_observation(
+        observer.as_ref(),
+        LifecycleObservation {
+            plugin: plugin_id.clone(),
+            scope: scope.id(),
+            phase,
+            outcome,
+            duration: started_at.elapsed(),
+        },
+    );
     result.map_err(|error| plugin_failure(plugin_id, phase, &error))
+}
+
+const HOOK_PANICKED_TAG: &str = "plugin.hook-panicked";
+
+fn hook_panicked() -> PluginError {
+    PluginError::new(HOOK_PANICKED_TAG, "plugin lifecycle hook panicked")
+}
+
+async fn run_plugin_hook<T, Fut>(build: impl FnOnce() -> Fut) -> Result<T, PluginError>
+where
+    Fut: Future<Output = Result<T, PluginError>>,
+{
+    let Ok(future) = std::panic::catch_unwind(AssertUnwindSafe(build)) else {
+        return Err(hook_panicked());
+    };
+    match AssertUnwindSafe(future).catch_unwind().await {
+        Ok(result) => result,
+        Err(_) => Err(hook_panicked()),
+    }
+}
+
+fn emit_observation(observer: &dyn ObservationSink, observation: LifecycleObservation) {
+    drop(std::panic::catch_unwind(AssertUnwindSafe(|| observer.record(observation))));
 }
 
 fn plugin_failure(plugin: &PluginId, phase: LifecyclePhase, error: &PluginError) -> FailureRecord {
