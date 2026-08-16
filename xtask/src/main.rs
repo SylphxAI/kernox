@@ -87,6 +87,20 @@ fn verify() -> Result<(), String> {
         &["run", "--locked", "--manifest-path", "fixtures/clean-consumer/Cargo.toml"],
         &[],
     )?;
+    run(
+        "clean-consumer-workload",
+        "cargo",
+        &[
+            "run",
+            "--release",
+            "--locked",
+            "--manifest-path",
+            "fixtures/clean-consumer/Cargo.toml",
+            "--",
+            "--workload",
+        ],
+        &[],
+    )?;
     run("dependency-policy", "cargo", &["deny", "check"], &[])?;
     run("advisories", "cargo", &["audit", "--deny", "warnings"], &[])?;
     run("core-package", "cargo", &["package", "--locked", "-p", "kernox-core"], &[])?;
