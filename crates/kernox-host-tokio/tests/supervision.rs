@@ -327,6 +327,38 @@ fn task_spawn_reports_missing_runtime_after_ready_app() {
 }
 
 #[test]
+fn shutdown_without_runtime_reports_typed_drain_failure() {
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+    let (mut app, tasks) = runtime.block_on(async {
+        let app = AppBuilder::new()
+            .host_capability(tokio_runtime_capability().unwrap())
+            .plugin(TokioTaskPlugin::new(TokioTaskConfig::default()).unwrap())
+            .resolve()
+            .unwrap()
+            .start()
+            .await
+            .unwrap();
+        let tasks =
+            app.capability_from::<TokioTasksCapability>(&tokio_task_plugin_id().unwrap()).unwrap();
+        tasks.spawn(TaskName::new("runtime-required-drain").unwrap(), Box::pin(pending())).unwrap();
+        tokio::task::yield_now().await;
+        (app, tasks)
+    });
+
+    let report = futures::executor::block_on(app.shutdown());
+
+    assert_eq!(report.failures.len(), 1);
+    assert_eq!(report.failures[0].error_tag, "tokio-task.no-runtime");
+    assert_eq!(
+        tasks
+            .spawn(TaskName::new("after-runtime-less-shutdown").unwrap(), Box::pin(async {}))
+            .unwrap_err(),
+        SpawnError::Closed
+    );
+    drop(runtime);
+}
+
+#[test]
 fn closed_admission_precedes_runtime_lookup() {
     let runtime = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
     let (mut app, tasks) = runtime.block_on(async {

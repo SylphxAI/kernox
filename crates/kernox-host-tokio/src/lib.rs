@@ -311,6 +311,16 @@ fn tokio_timer_available() -> bool {
 }
 
 async fn drain_failure(supervisor: &TaskSupervisor) -> Option<PluginError> {
+    if Handle::try_current().is_err() && supervisor.has_tracked_tasks() {
+        supervisor.abort_all();
+        if !supervisor.claim_drain_report() {
+            return None;
+        }
+        return Some(PluginError::new(
+            SpawnError::NoRuntime.tag(),
+            "Tokio runtime is required to drain supervised tasks",
+        ));
+    }
     let pending = supervisor.drain().await;
     if !supervisor.claim_drain_report() {
         return None;
@@ -428,6 +438,10 @@ impl TaskSupervisor {
         state.accepting = false;
         self.inner.tracker.close();
         self.inner.cancellation.cancel();
+    }
+
+    fn has_tracked_tasks(&self) -> bool {
+        !self.inner.tracker.is_empty()
     }
 
     async fn drain(&self) -> Vec<PendingTask> {

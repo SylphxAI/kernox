@@ -106,7 +106,9 @@ package that owns those resources.
   Tokio task host also requires an active Tokio runtime and timer driver while
   initializing; it fails with `tokio-task.no-runtime` or
   `tokio-task.no-timer` before readiness when either part of that execution
-  model is absent.
+  model is absent. If teardown is attempted outside Tokio while tracked tasks
+  remain, the host aborts admission, reports `tokio-task.no-runtime`, and does
+  not claim that asynchronous task destruction completed.
 - The deterministic testkit records lifecycle order and injects typed failures
   without network or process signals; domain clocks remain ordinary test
   capabilities rather than kernel policy.
