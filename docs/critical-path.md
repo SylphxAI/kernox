@@ -62,11 +62,15 @@ Exit evidence:
 
 - Exact candidate passes the single repository verification entrypoint and CI
   on PR and merge-group events.
+- The publishable package set has one version, complete metadata, and a
+  topological dependency order; `cargo package --locked --workspace` produces
+  the full dry-run artifact set from the locked source.
 - API semantic-version checks pass against the admitted predecessor where one
   exists.
 - Documentation examples compile from clean consumers.
-- Immutable packages are published in dependency order, checksums and source
-  revision are recorded, and registry readback passes.
+- Immutable packages are published in dependency order, a provenance receipt
+  records the source revision, lockfile, toolchain, and crate checksums, and
+  registry readback passes against those exact artifacts.
 - Source, CI, merged, package, and adoption states are reported separately.
 
 ## Kill or redesign triggers

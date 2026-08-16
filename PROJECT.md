@@ -51,7 +51,12 @@ application path.
 The requested terminal is a public, production-commercial-grade source and
 package release. `cargo run -p xtask -- verify` is the repository verification
 entrypoint. A local diff, commit, pull request, merge, or green CI run is not a
-package-release claim.
+package-release claim. Release automation separately validates the publishable
+package set and dependency order with
+`cargo run --locked -p xtask -- release-check`, dry-runs the complete workspace
+package graph, and records the
+tag, source revision, lockfile digest, toolchain, and crate checksums in an
+attested provenance receipt before registry publication and readback.
 
 ## Links
 

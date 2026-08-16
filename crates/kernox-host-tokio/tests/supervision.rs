@@ -2,13 +2,28 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-use std::{future::pending, sync::Arc, time::Duration};
+use std::{
+    future::pending,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use kernox_host_tokio::{
     SpawnError, TaskName, TokioTaskConfig, TokioTaskPlugin, TokioTasksCapability,
     tokio_task_plugin_id,
 };
 use kernox_runtime::AppBuilder;
+
+struct DropProbe(Arc<AtomicBool>);
+
+impl Drop for DropProbe {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
 
 #[tokio::test(flavor = "current_thread")]
 async fn cooperative_task_observes_cancellation_and_drains() {
@@ -48,18 +63,28 @@ async fn stubborn_task_is_named_reported_and_force_aborted() {
     let mut app = AppBuilder::new().plugin(plugin).resolve().unwrap().start().await.unwrap();
     let tasks =
         app.capability_from::<TokioTasksCapability>(&tokio_task_plugin_id().unwrap()).unwrap();
-    tasks.spawn(TaskName::new("stubborn-worker").unwrap(), Box::pin(pending())).unwrap();
+    let dropped = Arc::new(AtomicBool::new(false));
+    let drop_probe = Arc::clone(&dropped);
+    tasks
+        .spawn(
+            TaskName::new("stubborn-worker").unwrap(),
+            Box::pin(async move {
+                let _probe = DropProbe(drop_probe);
+                pending::<()>().await;
+            }),
+        )
+        .unwrap();
     assert_eq!(
         tasks.spawn(TaskName::new("over-capacity").unwrap(), Box::pin(async {})).unwrap_err(),
         SpawnError::Capacity
     );
 
     let report = app.shutdown().await;
-    tokio::task::yield_now().await;
 
     assert_eq!(report.failures.len(), 1);
     assert_eq!(report.failures[0].error_tag, "tokio-task.drain-timeout");
     assert!(report.failures[0].message.contains("stubborn-worker"));
+    assert!(dropped.load(Ordering::Acquire));
     assert!(tasks.pending_tasks().is_empty());
 }
 

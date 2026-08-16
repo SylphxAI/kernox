@@ -88,6 +88,8 @@ package that owns those resources.
 - A serverless Host may reuse one App Scope across warm invocations and creates
   a fresh Invocation Scope for every call. Correctness never depends on a
   shutdown callback.
+- A Tokio Host reports tasks that exceed the cooperative drain budget only
+  after forced abort has destroyed their tracked futures.
 - The deterministic testkit records lifecycle order and injects typed failures
   without network or process signals; domain clocks remain ordinary test
   capabilities rather than kernel policy.

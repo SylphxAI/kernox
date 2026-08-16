@@ -94,6 +94,7 @@ distributions have separate extended lanes.
 - [Static graph architecture ADR](docs/adr/20260815T185400Z-static-capability-graph.md)
 - [Runtime semantics](docs/specs/20260815T185400Z-runtime-contract.md)
 - [Production acceptance matrix](docs/specs/20260815T185400Z-acceptance.md)
+- [Standalone cardinality adopter](docs/specs/20260816-standalone-cardinality-adopter.md)
 - [Plugin authoring](docs/plugin-authoring.md)
 - [Compatibility](docs/compatibility.md)
 - [Performance evidence](docs/performance.md)
