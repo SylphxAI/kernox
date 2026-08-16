@@ -41,7 +41,8 @@ Exit evidence:
   hosts are implemented without contaminating core.
 - One unchanged domain plugin runs in both long-lived and serverless examples.
 - Request-specific state cannot cross warm serverless invocations.
-- Graph inspection and conformance tooling operate on versioned artifacts.
+- Graph inspection and conformance tooling operate on versioned artifacts; the
+  three-plugin reference application passes the executable conformance oracle.
 
 ## Gate 4 — Production hardening
 
