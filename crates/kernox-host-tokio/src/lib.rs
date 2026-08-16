@@ -25,6 +25,7 @@ const TASK_CAPABILITY_ID: &str = "dev.kernox.host.tokio.tasks";
 pub const TOKIO_RUNTIME_CAPABILITY_ID: &str = "dev.kernox.host.tokio.runtime";
 const CONTRACT_VERSION: &str = "1.0.0";
 const MAX_TASK_NAME_BYTES: usize = 128;
+const NO_TIMER_ERROR_TAG: &str = "tokio-task.no-timer";
 
 /// Marker for the Tokio supervised-task capability.
 pub struct TokioTasksCapability;
@@ -193,6 +194,11 @@ pub enum TokioTaskPluginError {
 }
 
 /// Kernox plugin that publishes one application-scoped Tokio task supervisor.
+///
+/// Initialization requires a Tokio runtime with its timer driver enabled. The
+/// plugin fails before readiness with `tokio-task.no-runtime` or
+/// `tokio-task.no-timer` when the selected execution model cannot provide the
+/// bounded drain contract.
 pub struct TokioTaskPlugin {
     descriptor: PluginDescriptor,
     config: TokioTaskConfig,
@@ -245,6 +251,11 @@ impl Plugin for TokioTaskPlugin {
                 ))
             });
         }
+        if !tokio_timer_available() {
+            return Box::pin(async {
+                Err(PluginError::new(NO_TIMER_ERROR_TAG, "Tokio runtime timers are not enabled"))
+            });
+        }
         let supervisor = Arc::new(TaskSupervisor::new(self.config));
         self.supervisor = Some(Arc::clone(&supervisor));
         let interface: Arc<dyn TokioTasks> = supervisor;
@@ -293,6 +304,10 @@ impl Plugin for TokioTaskPlugin {
             Ok(())
         })
     }
+}
+
+fn tokio_timer_available() -> bool {
+    std::panic::catch_unwind(|| drop(tokio::time::sleep(Duration::ZERO))).is_ok()
 }
 
 async fn drain_failure(supervisor: &TaskSupervisor) -> Option<PluginError> {

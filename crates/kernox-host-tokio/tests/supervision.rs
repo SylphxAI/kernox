@@ -283,6 +283,25 @@ fn missing_tokio_runtime_fails_before_readiness() {
 }
 
 #[test]
+fn missing_tokio_timer_fails_before_readiness() {
+    let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+    let failure = runtime.block_on(async {
+        AppBuilder::new()
+            .host_capability(tokio_runtime_capability().unwrap())
+            .plugin(TokioTaskPlugin::new(TokioTaskConfig::default()).unwrap())
+            .resolve()
+            .unwrap()
+            .start()
+            .await
+            .err()
+            .expect("Tokio host must require a timer driver")
+    });
+
+    assert_eq!(failure.primary.error_tag, "tokio-task.no-timer");
+    assert!(failure.cleanup_failures.is_empty());
+}
+
+#[test]
 fn task_spawn_reports_missing_runtime_after_ready_app() {
     let runtime = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
     let (_app, tasks) = runtime.block_on(async {
