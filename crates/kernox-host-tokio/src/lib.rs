@@ -380,6 +380,7 @@ impl TaskSupervisor {
         }
         let pending = self.pending_tasks();
         self.abort_all();
+        self.inner.tracker.wait().await;
         pending
     }
 
