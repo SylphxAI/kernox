@@ -71,6 +71,7 @@ cargo run -p kernox-example-checkout-app --bin checkout -- wallet
 cargo run -p kernox-example-worker-app --bin worker
 cargo run --locked --manifest-path fixtures/clean-consumer/Cargo.toml
 cargo run -p cargo-kernox -- kernox check fixtures/compositions/valid.json
+cargo run -p cargo-kernox -- kernox check fixtures/compositions/verified.json --verified
 cargo run -p cargo-kernox -- kernox graph fixtures/compositions/valid.json --format dot
 ```
 

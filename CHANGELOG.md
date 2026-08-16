@@ -33,5 +33,9 @@ evidence are mature.
 - Plugin hook and observation-sink unwinds no longer abort remaining lifecycle
   rollback. The executor reports `plugin.hook-panicked` without a panic payload
   and continues reverse cleanup.
+- Graph-level verified-application attribution in `kernox-core`, reused by the
+  testkit and `cargo kernox check --verified`.
+- Graph-level verified-application attribution in `kernox-core`, reused by the
+  testkit and `cargo kernox check --verified`.
 
 [Unreleased]: https://github.com/SylphxAI/kernox/commits/main

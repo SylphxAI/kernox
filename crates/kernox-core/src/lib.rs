@@ -4,11 +4,15 @@
 //! resolves capability providers, and produces a deterministic dependency and
 //! lifecycle graph. It performs no I/O and depends on no async runtime.
 
+mod attribution;
 mod descriptor;
 mod error;
 mod graph;
 mod id;
 
+pub use attribution::{
+    AttributionError, AttributionReport, MINIMUM_VERIFIED_PLUGINS, verify_graph_attribution,
+};
 pub use descriptor::{
     Binding, CapabilityOffer, CapabilityRequirement, PluginDescriptor, PluginSource,
     RequirementCardinality,

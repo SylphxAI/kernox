@@ -3,6 +3,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use futures::executor::block_on;
+use kernox_core::AttributionError;
 use kernox_core::{PluginDescriptor, PluginId, PluginSource};
 use kernox_runtime::AppBuilder;
 use kernox_testkit::{ConformanceError, MINIMUM_VERIFIED_PLUGINS, ProbePlugin, verify_application};
@@ -40,7 +41,10 @@ fn conformance_rejects_fewer_than_three_plugins_before_startup() {
     assert_eq!(error.tag(), "conformance.too-few-plugins");
     assert!(matches!(
         error,
-        ConformanceError::TooFewPlugins { actual: 2, minimum: MINIMUM_VERIFIED_PLUGINS }
+        ConformanceError::Attribution(AttributionError::TooFewPlugins {
+            actual: 2,
+            minimum: MINIMUM_VERIFIED_PLUGINS
+        })
     ));
 }
 
