@@ -147,6 +147,29 @@ pub enum ResolveError {
         /// Supported schema version.
         supported: u32,
     },
+    /// The serialized graph-report schema major is unsupported.
+    #[error("graph report schema version {actual} is unsupported; expected {supported}")]
+    UnsupportedReportSchemaVersion {
+        /// Observed report schema version.
+        actual: u32,
+        /// Supported report schema version.
+        supported: u32,
+    },
+    /// The report's teardown order is not the exact reverse of startup order.
+    #[error("graph report teardown order is not the reverse of startup order")]
+    InconsistentReportLifecycle,
+    /// A plugin identity is repeated in the report projection.
+    #[error("graph report repeats plugin {plugin}")]
+    DuplicateReportPlugin {
+        /// Duplicated plugin identity.
+        plugin: PluginId,
+    },
+    /// A report relation names a plugin that is not in the plugin list.
+    #[error("graph report references unknown plugin {plugin}")]
+    UnknownReportPlugin {
+        /// Missing plugin identity.
+        plugin: PluginId,
+    },
     /// A caller attempted to raise a resource limit beyond Kernox's hard bound.
     #[error("configured {limit} limit {actual} exceeds absolute maximum {maximum}")]
     ConfiguredLimitExceeded {
@@ -315,6 +338,10 @@ impl ResolveError {
     pub const fn tag(&self) -> &'static str {
         match self {
             Self::UnsupportedSchemaVersion { .. } => "graph.unsupported-schema-version",
+            Self::UnsupportedReportSchemaVersion { .. } => "graph.unsupported-report-schema",
+            Self::InconsistentReportLifecycle => "graph.inconsistent-report-lifecycle",
+            Self::DuplicateReportPlugin { .. } => "graph.duplicate-report-plugin",
+            Self::UnknownReportPlugin { .. } => "graph.unknown-report-plugin",
             Self::ConfiguredLimitExceeded { .. } => "graph.configured-limit-exceeded",
             Self::PluginLimitExceeded { .. } => "graph.plugin-limit",
             Self::CapabilityLimitExceeded { .. } => "graph.capability-limit",

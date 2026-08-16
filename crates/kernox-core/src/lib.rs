@@ -20,7 +20,13 @@ pub use graph::{
 };
 pub use id::{CapabilityId, PluginId};
 
-/// Schema version emitted by [`GraphReport`].
+/// Schema version accepted by serialized [`CompositionSpec`] inputs.
+pub const COMPOSITION_SCHEMA_VERSION: u32 = 1;
+
+/// Schema version emitted and accepted by [`GraphReport`].
+///
+/// Composition input and inspectable reports are versioned independently so
+/// one contract can evolve without forcing the other.
 pub const GRAPH_REPORT_SCHEMA_VERSION: u32 = 1;
 
 /// Absolute plugin count ceiling accepted by the resolver.

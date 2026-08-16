@@ -24,6 +24,9 @@ evidence are mature.
   insertion-order coverage and a dedicated scaling benchmark.
 - North Star conformance oracle for three-plugin source-attributed applications,
   including clean startup and shutdown proof on the reference app.
+- Independent composition-input and graph-report schema versions, with
+  fail-closed report readers that reject an unsupported report major,
+  reversed lifecycle order, duplicate plugins, and unknown plugin refs.
 
 ### Fixed
 

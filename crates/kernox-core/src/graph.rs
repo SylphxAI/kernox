@@ -4,8 +4,8 @@ use semver::Version;
 
 use crate::{
     ABSOLUTE_MAX_CAPABILITIES_PER_PLUGIN, ABSOLUTE_MAX_EDGES, ABSOLUTE_MAX_PLUGINS, Binding,
-    CapabilityId, CapabilityRequirement, GRAPH_REPORT_SCHEMA_VERSION, PluginDescriptor, PluginId,
-    RequirementCardinality, ResolveError,
+    COMPOSITION_SCHEMA_VERSION, CapabilityId, CapabilityRequirement, GRAPH_REPORT_SCHEMA_VERSION,
+    PluginDescriptor, PluginId, RequirementCardinality, ResolveError,
 };
 
 /// Resource limits applied during graph resolution.
@@ -45,7 +45,7 @@ pub struct CompositionSpec {
 impl Default for CompositionSpec {
     fn default() -> Self {
         Self {
-            schema_version: GRAPH_REPORT_SCHEMA_VERSION,
+            schema_version: COMPOSITION_SCHEMA_VERSION,
             limits: GraphLimits::default(),
             plugins: Vec::new(),
             bindings: Vec::new(),
@@ -144,7 +144,7 @@ pub struct PluginSummary {
 }
 
 /// Versioned inspectable projection of a resolved graph.
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GraphReport {
@@ -162,6 +162,53 @@ pub struct GraphReport {
     pub startup_order: Vec<PluginId>,
     /// Exact reverse lifecycle teardown order.
     pub teardown_order: Vec<PluginId>,
+}
+
+impl GraphReport {
+    /// Accepts a decoded report only when its schema and projection agree.
+    ///
+    /// # Errors
+    ///
+    /// Returns a report-schema or report-consistency [`ResolveError`] when the
+    /// major is unsupported, teardown is not the reverse of startup, a plugin
+    /// identity is repeated, or a relation names an unknown plugin.
+    pub fn accept(self) -> Result<Self, ResolveError> {
+        validate_report(&self)?;
+        Ok(self)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for GraphReport {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            schema_version: u32,
+            plugins: Vec<PluginSummary>,
+            requirements: Vec<ResolvedRequirement>,
+            edges: Vec<ResolvedEdge>,
+            diagnostics: Vec<GraphDiagnostic>,
+            startup_order: Vec<PluginId>,
+            teardown_order: Vec<PluginId>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        Self {
+            schema_version: wire.schema_version,
+            plugins: wire.plugins,
+            requirements: wire.requirements,
+            edges: wire.edges,
+            diagnostics: wire.diagnostics,
+            startup_order: wire.startup_order,
+            teardown_order: wire.teardown_order,
+        }
+        .accept()
+        .map_err(serde::de::Error::custom)
+    }
 }
 
 /// One non-fatal, machine-readable graph finding.
@@ -489,11 +536,77 @@ fn validate_configured_limits(limits: GraphLimits) -> Result<(), ResolveError> {
 }
 
 fn validate_schema_version(actual: u32) -> Result<(), ResolveError> {
+    if actual == COMPOSITION_SCHEMA_VERSION {
+        return Ok(());
+    }
+
+    Err(ResolveError::UnsupportedSchemaVersion { actual, supported: COMPOSITION_SCHEMA_VERSION })
+}
+
+fn validate_report_schema(actual: u32) -> Result<(), ResolveError> {
     if actual == GRAPH_REPORT_SCHEMA_VERSION {
         return Ok(());
     }
 
-    Err(ResolveError::UnsupportedSchemaVersion { actual, supported: GRAPH_REPORT_SCHEMA_VERSION })
+    Err(ResolveError::UnsupportedReportSchemaVersion {
+        actual,
+        supported: GRAPH_REPORT_SCHEMA_VERSION,
+    })
+}
+
+fn validate_report(report: &GraphReport) -> Result<(), ResolveError> {
+    validate_report_schema(report.schema_version)?;
+
+    let mut plugins = BTreeSet::new();
+    for plugin in &report.plugins {
+        if !plugins.insert(plugin.id.clone()) {
+            return Err(ResolveError::DuplicateReportPlugin { plugin: plugin.id.clone() });
+        }
+    }
+
+    if report.startup_order.len() != plugins.len()
+        || report.startup_order.iter().any(|plugin| !plugins.contains(plugin))
+    {
+        let unknown =
+            report.startup_order.iter().find(|plugin| !plugins.contains(*plugin)).cloned().or_else(
+                || plugins.iter().find(|plugin| !report.startup_order.contains(plugin)).cloned(),
+            );
+        if let Some(plugin) = unknown {
+            return Err(ResolveError::UnknownReportPlugin { plugin });
+        }
+        return Err(ResolveError::InconsistentReportLifecycle);
+    }
+
+    if report.teardown_order.len() != report.startup_order.len()
+        || report
+            .teardown_order
+            .iter()
+            .zip(report.startup_order.iter().rev())
+            .any(|(actual, expected)| actual != expected)
+    {
+        return Err(ResolveError::InconsistentReportLifecycle);
+    }
+
+    for plugin in report_relation_plugins(report) {
+        if !plugins.contains(plugin) {
+            return Err(ResolveError::UnknownReportPlugin { plugin: plugin.clone() });
+        }
+    }
+    Ok(())
+}
+
+fn report_relation_plugins(report: &GraphReport) -> impl Iterator<Item = &PluginId> {
+    report
+        .requirements
+        .iter()
+        .flat_map(|requirement| {
+            std::iter::once(&requirement.consumer).chain(requirement.providers.iter())
+        })
+        .chain(report.edges.iter().flat_map(|edge| [&edge.provider, &edge.consumer]))
+        .chain(report.diagnostics.iter().map(|diagnostic| match diagnostic {
+            GraphDiagnostic::OptionalProviderMissing { consumer, .. } => consumer,
+            GraphDiagnostic::UnselectedOffer { provider, .. } => provider,
+        }))
 }
 
 fn validate_plugin_limit(actual: usize, maximum: usize) -> Result<(), ResolveError> {
@@ -926,6 +1039,9 @@ mod tests {
 
         let report =
             GraphBuilder::new().plugin(consumer).plugin(provider).resolve().unwrap().report();
+        let round_trip: GraphReport =
+            serde_json::from_value(serde_json::to_value(&report).unwrap()).unwrap();
+        assert_eq!(round_trip, report);
         let actual = serde_json::to_value(report).unwrap();
         let expected = serde_json::json!({
             "schema_version": 1,
@@ -981,6 +1097,87 @@ mod tests {
         let error = GraphBuilder::from_spec(spec).resolve().unwrap_err();
 
         assert_eq!(error.tag(), "graph.unsupported-schema-version");
+    }
+
+    #[test]
+    fn rejects_an_unsupported_graph_report_schema() {
+        let error = GraphReport {
+            schema_version: 2,
+            plugins: Vec::new(),
+            requirements: Vec::new(),
+            edges: Vec::new(),
+            diagnostics: Vec::new(),
+            startup_order: Vec::new(),
+            teardown_order: Vec::new(),
+        }
+        .accept()
+        .unwrap_err();
+
+        assert_eq!(error.tag(), "graph.unsupported-report-schema");
+    }
+
+    #[test]
+    fn rejects_inconsistent_or_referentially_invalid_graph_reports() {
+        let clock = plugin("dev.example.clock");
+        let orders = plugin("dev.example.orders");
+        let report = GraphBuilder::new()
+            .plugin(
+                PluginDescriptor::new(clock.clone(), version())
+                    .provide(CapabilityOffer::new(capability("dev.example.clock"), version()))
+                    .unwrap(),
+            )
+            .plugin(
+                PluginDescriptor::new(orders.clone(), version())
+                    .require(CapabilityRequirement::exactly_one(
+                        capability("dev.example.clock"),
+                        requirement(),
+                    ))
+                    .unwrap(),
+            )
+            .resolve()
+            .unwrap()
+            .report();
+
+        let mut reversed = report.clone();
+        reversed.teardown_order = report.startup_order.clone();
+        assert_eq!(reversed.accept().unwrap_err().tag(), "graph.inconsistent-report-lifecycle");
+
+        let mut duplicated = report.clone();
+        duplicated.plugins.push(duplicated.plugins[0].clone());
+        assert_eq!(duplicated.accept().unwrap_err().tag(), "graph.duplicate-report-plugin");
+
+        let mut unknown = report;
+        unknown.edges[0].consumer = plugin("dev.example.missing");
+        assert_eq!(unknown.accept().unwrap_err().tag(), "graph.unknown-report-plugin");
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn report_deserialization_rejects_unsupported_schema_and_unknown_fields() {
+        let unsupported = r#"{
+            "schema_version": 2,
+            "plugins": [],
+            "requirements": [],
+            "edges": [],
+            "diagnostics": [],
+            "startup_order": [],
+            "teardown_order": []
+        }"#;
+        let error = serde_json::from_str::<GraphReport>(unsupported).unwrap_err();
+        assert!(error.to_string().contains("unsupported"));
+
+        let unknown_field = r#"{
+            "schema_version": 1,
+            "plugins": [],
+            "requirements": [],
+            "edges": [],
+            "diagnostics": [],
+            "startup_order": [],
+            "teardown_order": [],
+            "surprise": true
+        }"#;
+        let error = serde_json::from_str::<GraphReport>(unknown_field).unwrap_err();
+        assert!(error.to_string().contains("unknown field"));
     }
 
     #[test]

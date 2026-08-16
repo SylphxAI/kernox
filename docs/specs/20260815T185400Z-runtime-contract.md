@@ -34,7 +34,8 @@ Resolution outputs:
 - dependency edges with requirement attribution;
 - startup and reverse teardown order;
 - unselected-offer and optional-miss diagnostics; and
-- a schema-versioned inspectable graph report.
+- a schema-versioned inspectable graph report whose readers reject an
+  unsupported report major independently of the composition-input schema.
 
 ## Provision contract
 
