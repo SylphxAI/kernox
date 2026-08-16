@@ -508,7 +508,9 @@ dependencies = [
 name = "kernox-example-order-app"
 version = "1.0.0"
 dependencies = [
+ "futures",
  "kernox",
+ "kernox-testkit",
  "semver",
  "thiserror",
  "tokio",
@@ -556,6 +558,7 @@ dependencies = [
  "kernox-core",
  "kernox-runtime",
  "semver",
+ "thiserror",
 ]
 
 [[package]]
