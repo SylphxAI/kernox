@@ -130,6 +130,7 @@ dependencies = [
 name = "kernox-runtime"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "kernox-core",
  "semver",
  "thiserror",

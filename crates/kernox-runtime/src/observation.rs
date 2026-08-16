@@ -64,6 +64,9 @@ pub struct LifecycleObservation {
 /// Synchronous observation boundary implemented by host adapters.
 pub trait ObservationSink: Send + Sync + 'static {
     /// Records one completed hook without receiving plugin payloads or secrets.
+    ///
+    /// Implementations must be fast and should not panic. The runtime isolates
+    /// an unwind from `record` so it cannot abort remaining lifecycle hooks.
     fn record(&self, observation: LifecycleObservation);
 }
 

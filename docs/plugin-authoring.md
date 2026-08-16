@@ -62,9 +62,10 @@ set. On error or mismatch, none of that plugin's provisions become visible and
 - `dispose`: release resources and tolerate partial initialization.
 
 Expected failures return `PluginError` with a stable static tag. Do not panic
-for caller-controlled input. A native plugin runs with host-process privilege;
-Kernox does not make panic recovery, memory isolation, or runtime unloading
-safe.
+for caller-controlled input. If a hook still unwinds, Kernox reports
+`plugin.hook-panicked` and continues transactional rollback or later cleanup
+hooks; this is not memory isolation or a sandbox. A native plugin runs with
+host-process privilege, and `panic=abort` remains a process failure.
 
 ## 5. Keep architecture direction inward
 

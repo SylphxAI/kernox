@@ -31,6 +31,9 @@ pub trait Plugin: Send + Sync + 'static {
     fn descriptor(&self) -> &PluginDescriptor;
 
     /// Builds declared provisions using only declared, already-ready dependencies.
+    ///
+    /// An unwind from this method or its future becomes `plugin.hook-panicked`
+    /// and rolls back already initialized plugins. It is not plugin isolation.
     fn initialize<'a>(
         &'a mut self,
         context: InitializationContext<'a>,

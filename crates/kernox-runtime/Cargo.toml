@@ -13,6 +13,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+futures-util.workspace = true
 kernox-core.workspace = true
 semver.workspace = true
 thiserror.workspace = true
