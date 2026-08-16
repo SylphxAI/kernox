@@ -2,6 +2,8 @@
 
 All notable changes are documented here. Kernox follows Semantic Versioning;
 descriptor/report schema compatibility is versioned separately where stated.
+The project is intentionally pre-1.0 until its engine contracts and adoption
+evidence are mature.
 
 ## [Unreleased]
 

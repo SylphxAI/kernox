@@ -92,6 +92,10 @@ distributions have separate extended lanes.
 
 ## Release state
 
+Kernox is currently a pre-1.0 development engine. The workspace uses the
+`0.1.x` package train; no stable 1.0 publication is permitted while the public
+API and lifecycle contracts are still evolving.
+
 Source correctness, pull-request CI, merge state, crates.io packages, and real
 product adoption are separate facts. Consult GitHub Actions/Releases and the
 crates.io package pages for those current states; this README does not turn a

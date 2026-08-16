@@ -11,14 +11,14 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
-kernox = { path = "../../crates/kernox", version = "1.0.0", features = ["full"] }
+kernox = { path = "../../crates/kernox", version = "0.1.0", features = ["full"] }
 semver.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [dev-dependencies]
 futures.workspace = true
-kernox-testkit = { path = "../../crates/kernox-testkit", version = "1.0.0" }
+kernox-testkit = { path = "../../crates/kernox-testkit", version = "0.1.0" }
 
 [lints]
 workspace = true

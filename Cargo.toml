@@ -14,7 +14,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.0.0"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
@@ -30,7 +30,7 @@ clap = { version = "4.6.6", features = ["derive"] }
 criterion = "0.8.2"
 futures = "0.3.34"
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
-kernox-core = { path = "crates/kernox-core", version = "1.0.0" }
+kernox-core = { path = "crates/kernox-core", version = "0.1.0" }
 proptest = "1.11.0"
 semver = { version = "1.0.28", default-features = false, features = ["std"] }
 serde = { version = "1.0.229", features = ["derive"] }
