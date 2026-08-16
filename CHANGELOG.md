@@ -18,5 +18,7 @@ descriptor/report schema compatibility is versioned separately where stated.
   host-neutral three-plugin reference application.
 - Fail-closed task-panic supervision, bounded graph diagnostics, and
   concurrency regressions for scope closure and long-lived child retention.
+- Indexed consumer/capability requirement lookup during initialization, with
+  insertion-order coverage and a dedicated scaling benchmark.
 
 [Unreleased]: https://github.com/SylphxAI/kernox/commits/main

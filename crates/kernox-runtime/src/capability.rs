@@ -276,16 +276,10 @@ impl<'a> InitializationContext<'a> {
     }
 
     fn requirement(&self, capability: &CapabilityId) -> Result<&ResolvedRequirement, AccessError> {
-        self.graph
-            .requirements()
-            .iter()
-            .find(|requirement| {
-                requirement.consumer == *self.consumer && requirement.capability == *capability
-            })
-            .ok_or_else(|| AccessError::Undeclared {
-                consumer: self.consumer.clone(),
-                capability: capability.clone(),
-            })
+        self.graph.requirement(self.consumer, capability).ok_or_else(|| AccessError::Undeclared {
+            consumer: self.consumer.clone(),
+            capability: capability.clone(),
+        })
     }
 
     fn cardinality_error(&self, requirement: &ResolvedRequirement) -> AccessError {

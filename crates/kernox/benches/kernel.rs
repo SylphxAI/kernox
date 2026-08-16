@@ -1,4 +1,4 @@
-//! Resolver scaling and steady-state direct-handle benchmarks.
+//! Resolver scaling, indexed dependency lookup, and steady-state direct-handle benchmarks.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -84,6 +84,35 @@ fn graph_spec(size: usize, density: Density) -> CompositionSpec {
     }
 }
 
+fn indexed_requirement_lookup(criterion: &mut Criterion) {
+    let consumer_id = PluginId::new("dev.kernox.bench.consumer").unwrap();
+    let mut consumer = PluginDescriptor::new(consumer_id.clone(), Version::new(1, 0, 0));
+    let mut builder = GraphBuilder::new();
+    for index in 0..256_usize {
+        let capability = CapabilityId::new(format!("dev.kernox.bench.requirement{index}")).unwrap();
+        let provider = PluginDescriptor::new(
+            PluginId::new(format!("dev.kernox.bench.provider{index}")).unwrap(),
+            Version::new(1, 0, 0),
+        )
+        .provide(CapabilityOffer::new(capability.clone(), Version::new(1, 0, 0)))
+        .unwrap();
+        builder = builder.plugin(provider);
+        consumer = consumer
+            .require(CapabilityRequirement::exactly_one(
+                capability,
+                VersionReq::parse("^1.0").unwrap(),
+            ))
+            .unwrap();
+    }
+    let graph = builder.plugin(consumer).resolve().unwrap();
+    let target = CapabilityId::new("dev.kernox.bench.requirement127").unwrap();
+    let mut group = criterion.benchmark_group("indexed-requirement-lookup");
+    group.bench_function("256-requirements", |bencher| {
+        bencher.iter(|| black_box(graph.requirement(black_box(&consumer_id), black_box(&target))));
+    });
+    group.finish();
+}
+
 trait Compute: Send + Sync {
     fn apply(&self, value: u64) -> u64;
 }
@@ -165,5 +194,5 @@ fn steady_state_calls(criterion: &mut Criterion) {
     assert!(report.is_clean());
 }
 
-criterion_group!(benches, graph_resolution, steady_state_calls);
+criterion_group!(benches, graph_resolution, indexed_requirement_lookup, steady_state_calls);
 criterion_main!(benches);

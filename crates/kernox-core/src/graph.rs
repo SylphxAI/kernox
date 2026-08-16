@@ -229,6 +229,28 @@ impl ResolvedGraph {
         &self.requirements
     }
 
+    /// Returns one requirement by its owning plugin and capability identity.
+    ///
+    /// Requirements are kept in stable consumer/capability order, so runtime
+    /// dependency acquisition uses a logarithmic lookup instead of scanning
+    /// every requirement in the graph.
+    #[must_use]
+    pub fn requirement(
+        &self,
+        consumer: &PluginId,
+        capability: &CapabilityId,
+    ) -> Option<&ResolvedRequirement> {
+        self.requirements
+            .binary_search_by(|requirement| {
+                requirement
+                    .consumer
+                    .cmp(consumer)
+                    .then_with(|| requirement.capability.cmp(capability))
+            })
+            .ok()
+            .map(|index| &self.requirements[index])
+    }
+
     /// Returns capability-attributed edges in stable order.
     #[must_use]
     pub fn edges(&self) -> &[ResolvedEdge] {
@@ -368,6 +390,13 @@ fn resolve(spec: CompositionSpec) -> Result<ResolvedGraph, ResolveError> {
             capability: capability.clone(),
         });
     }
+
+    // The public report contract promises this order. Keep the invariant
+    // explicit so `ResolvedGraph::requirement` remains a safe indexed lookup
+    // even if the resolution loop changes in a future release.
+    resolved_requirements.sort_unstable_by(|left, right| {
+        left.consumer.cmp(&right.consumer).then_with(|| left.capability.cmp(&right.capability))
+    });
 
     let edges: Vec<_> = resolved_edges.into_iter().collect();
     let diagnostics = graph_diagnostics(&plugins, &resolved_requirements, &edges);
@@ -834,6 +863,50 @@ mod tests {
         assert!(
             graph.edges().iter().all(|edge| positions[&edge.provider] < positions[&edge.consumer])
         );
+    }
+
+    #[test]
+    fn requirement_lookup_returns_exact_consumer_capability_pair() {
+        let clock = capability("dev.example.clock");
+        let database = capability("dev.example.database");
+        let provider = PluginDescriptor::new(plugin("dev.example.provider"), version())
+            .provide(CapabilityOffer::new(clock.clone(), version()))
+            .unwrap()
+            .provide(CapabilityOffer::new(database.clone(), version()))
+            .unwrap();
+        let consumer = PluginDescriptor::new(plugin("dev.example.consumer"), version())
+            .require(CapabilityRequirement::exactly_one(clock.clone(), requirement()))
+            .unwrap()
+            .require(CapabilityRequirement::exactly_one(database.clone(), requirement()))
+            .unwrap();
+
+        let graph = GraphBuilder::new().plugin(consumer).plugin(provider).resolve().unwrap();
+        let clock_requirement = graph
+            .requirement(&plugin("dev.example.consumer"), &clock)
+            .expect("declared clock requirement should be indexed");
+        assert_eq!(clock_requirement.providers, [plugin("dev.example.provider")]);
+        assert!(graph.requirement(&plugin("dev.example.missing"), &clock).is_none());
+    }
+
+    #[test]
+    fn requirement_lookup_preserves_dependency_report_across_insertion_order() {
+        let clock = capability("dev.example.clock");
+        let provider = PluginDescriptor::new(plugin("dev.example.provider"), version())
+            .provide(CapabilityOffer::new(clock.clone(), version()))
+            .unwrap();
+        let consumer = PluginDescriptor::new(plugin("dev.example.consumer"), version())
+            .require(CapabilityRequirement::exactly_one(clock.clone(), requirement()))
+            .unwrap();
+
+        let forward = GraphBuilder::new()
+            .plugin(provider.clone())
+            .plugin(consumer.clone())
+            .resolve()
+            .unwrap();
+        let reverse = GraphBuilder::new().plugin(consumer).plugin(provider).resolve().unwrap();
+
+        assert_eq!(forward.report(), reverse.report());
+        assert!(reverse.requirement(&plugin("dev.example.consumer"), &clock).is_some());
     }
 
     #[test]
