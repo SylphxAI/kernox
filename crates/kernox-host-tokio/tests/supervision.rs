@@ -259,6 +259,8 @@ async fn initialization_rollback_drains_tasks_before_returning() {
 #[test]
 fn malformed_names_and_missing_runtime_fail_without_spawning() {
     assert_eq!(TaskName::new("").unwrap_err(), SpawnError::InvalidName);
+    assert_eq!(TaskName::new("worker\u{202e}name").unwrap_err(), SpawnError::InvalidName);
+    assert_eq!(TaskName::new("worker\u{200b}name").unwrap_err(), SpawnError::InvalidName);
     let plugin = TokioTaskPlugin::new(TokioTaskConfig::default()).unwrap();
     let app = futures::executor::block_on(async {
         AppBuilder::new()

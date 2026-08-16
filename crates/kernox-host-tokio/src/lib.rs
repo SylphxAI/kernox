@@ -51,7 +51,7 @@ impl fmt::Display for TaskId {
 pub struct TaskName(String);
 
 impl TaskName {
-    /// Creates a non-empty bounded task name without control characters.
+    /// Creates a non-empty bounded task name without control or format characters.
     ///
     /// # Errors
     ///
@@ -60,7 +60,7 @@ impl TaskName {
         let value = value.into();
         if value.is_empty()
             || value.len() > MAX_TASK_NAME_BYTES
-            || value.chars().any(char::is_control)
+            || value.chars().any(is_unsafe_name_char)
         {
             return Err(SpawnError::InvalidName);
         }
@@ -72,6 +72,19 @@ impl TaskName {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+fn is_unsafe_name_char(character: char) -> bool {
+    character.is_control()
+        || matches!(
+            character,
+            '\u{061c}'
+                | '\u{200b}'..='\u{200f}'
+                | '\u{2028}'..='\u{202e}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{206f}'
+                | '\u{feff}'
+        )
 }
 
 /// Failure to admit a supervised task.
