@@ -147,6 +147,14 @@ pub enum ResolveError {
         /// Supported schema version.
         supported: u32,
     },
+    /// The serialized graph-report schema major is unsupported.
+    #[error("graph report schema version {actual} is unsupported; expected {supported}")]
+    UnsupportedReportSchemaVersion {
+        /// Observed report schema version.
+        actual: u32,
+        /// Supported report schema version.
+        supported: u32,
+    },
     /// A caller attempted to raise a resource limit beyond Kernox's hard bound.
     #[error("configured {limit} limit {actual} exceeds absolute maximum {maximum}")]
     ConfiguredLimitExceeded {
@@ -315,6 +323,7 @@ impl ResolveError {
     pub const fn tag(&self) -> &'static str {
         match self {
             Self::UnsupportedSchemaVersion { .. } => "graph.unsupported-schema-version",
+            Self::UnsupportedReportSchemaVersion { .. } => "graph.unsupported-report-schema",
             Self::ConfiguredLimitExceeded { .. } => "graph.configured-limit-exceeded",
             Self::PluginLimitExceeded { .. } => "graph.plugin-limit",
             Self::CapabilityLimitExceeded { .. } => "graph.capability-limit",

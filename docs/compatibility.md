@@ -19,9 +19,12 @@ semantic behavior requires a capability major-version change. Explicit product
 bindings select among compatible providers and are never inferred from build
 order.
 
-Serialized composition and graph reports carry their own schema version.
-Readers reject unsupported versions instead of guessing. Stable error tags are
-machine contracts within a major line; display prose is not.
+Serialized composition inputs and graph reports carry independent schema
+versions (`COMPOSITION_SCHEMA_VERSION` and `GRAPH_REPORT_SCHEMA_VERSION`).
+Readers reject unsupported versions instead of guessing: composition files fail
+at `GraphBuilder::resolve`, and report bytes fail at `GraphReport`
+deserialization / `GraphReport::accept`. Stable error tags are machine
+contracts within a major line; display prose is not.
 
 Static Rust source compatibility is not an ABI promise. A future process or
 WebAssembly Component plugin boundary requires a separate accepted ABI/WIT,
