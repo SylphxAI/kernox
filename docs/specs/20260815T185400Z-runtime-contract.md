@@ -98,7 +98,9 @@ package that owns those resources.
   deadline is rejected before user code runs; in-flight cancellation remains a
   provider/runtime concern. Correctness never depends on a shutdown callback.
 - A Tokio Host reports tasks that exceed the cooperative drain budget only
-  after forced abort has destroyed their tracked futures.
+  after forced abort has destroyed their tracked futures. The same drain and
+  failure reporting applies when initialization rollback reaches the host's
+  dispose hook before readiness.
 - The deterministic testkit records lifecycle order and injects typed failures
   without network or process signals; domain clocks remain ordinary test
   capabilities rather than kernel policy.

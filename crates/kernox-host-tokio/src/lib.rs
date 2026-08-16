@@ -253,35 +253,7 @@ impl Plugin for TokioTaskPlugin {
             let Some(supervisor) = supervisor else {
                 return Ok(());
             };
-            let pending = supervisor.drain().await;
-            if let Some(failure) = supervisor.terminal_failure() {
-                let pending_suffix = if pending.is_empty() {
-                    String::new()
-                } else {
-                    format!("; {} peer task(s) also exceeded drain budget", pending.len())
-                };
-                Err(PluginError::new(
-                    failure.error_tag,
-                    format!(
-                        "{}:{} terminated unexpectedly{pending_suffix}",
-                        failure.id,
-                        failure.name.as_str()
-                    ),
-                ))
-            } else if pending.is_empty() {
-                Ok(())
-            } else {
-                let names = pending
-                    .iter()
-                    .take(16)
-                    .map(|task| format!("{}:{}", task.id, task.name.as_str()))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                Err(PluginError::new(
-                    "tokio-task.drain-timeout",
-                    format!("{} task(s) exceeded drain budget: {names}", pending.len()),
-                ))
-            }
+            drain_failure(&supervisor).await.map_or(Ok(()), Err)
         })
     }
 
@@ -293,10 +265,47 @@ impl Plugin for TokioTaskPlugin {
         Box::pin(async move {
             if let Some(supervisor) = supervisor {
                 supervisor.quiesce();
-                supervisor.abort_all();
+                if let Some(error) = drain_failure(&supervisor).await {
+                    return Err(error);
+                }
             }
             Ok(())
         })
+    }
+}
+
+async fn drain_failure(supervisor: &TaskSupervisor) -> Option<PluginError> {
+    let pending = supervisor.drain().await;
+    if !supervisor.claim_drain_report() {
+        return None;
+    }
+    if let Some(failure) = supervisor.terminal_failure() {
+        let pending_suffix = if pending.is_empty() {
+            String::new()
+        } else {
+            format!("; {} peer task(s) also exceeded drain budget", pending.len())
+        };
+        Some(PluginError::new(
+            failure.error_tag,
+            format!(
+                "{}:{} terminated unexpectedly{pending_suffix}",
+                failure.id,
+                failure.name.as_str()
+            ),
+        ))
+    } else if pending.is_empty() {
+        None
+    } else {
+        let names = pending
+            .iter()
+            .take(16)
+            .map(|task| format!("{}:{}", task.id, task.name.as_str()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(PluginError::new(
+            "tokio-task.drain-timeout",
+            format!("{} task(s) exceeded drain budget: {names}", pending.len()),
+        ))
     }
 }
 
@@ -312,6 +321,7 @@ struct State {
     next_id: u64,
     tasks: BTreeMap<TaskId, TaskRecord>,
     terminal_failure: Option<TaskFailure>,
+    drain_reported: bool,
 }
 
 struct SupervisorInner {
@@ -371,6 +381,7 @@ impl TaskSupervisor {
                     next_id: 1,
                     tasks: BTreeMap::new(),
                     terminal_failure: None,
+                    drain_reported: false,
                 }),
             }),
         }
@@ -408,6 +419,16 @@ impl TaskSupervisor {
             .collect();
         for handle in handles {
             handle.abort();
+        }
+    }
+
+    fn claim_drain_report(&self) -> bool {
+        let mut state = self.inner.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.drain_reported {
+            false
+        } else {
+            state.drain_reported = true;
+            true
         }
     }
 }

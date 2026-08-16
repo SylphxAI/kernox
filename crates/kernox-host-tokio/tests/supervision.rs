@@ -11,19 +11,104 @@ use std::{
     time::Duration,
 };
 
-use kernox_core::CapabilityId;
+use kernox_core::{CapabilityId, CapabilityRequirement, PluginDescriptor, PluginId};
 use kernox_host_tokio::{
     SpawnError, TOKIO_RUNTIME_CAPABILITY_ID, TaskName, TokioTaskConfig, TokioTaskPlugin,
     TokioTasksCapability, tokio_runtime_capability, tokio_task_plugin_id,
 };
-use kernox_runtime::{AppBuilder, HostCapability};
-use semver::Version;
+use kernox_runtime::{
+    AppBuilder, BoxFuture, Capability, HostCapability, InitializationContext, Plugin, PluginError,
+    ProvisionSet,
+};
+use semver::{Version, VersionReq};
 
 struct DropProbe(Arc<AtomicBool>);
 
 impl Drop for DropProbe {
     fn drop(&mut self) {
         self.0.store(true, Ordering::Release);
+    }
+}
+
+struct InitTaskPlugin {
+    descriptor: PluginDescriptor,
+    dropped: Arc<AtomicBool>,
+}
+
+impl InitTaskPlugin {
+    fn new(dropped: Arc<AtomicBool>) -> Self {
+        let descriptor = PluginDescriptor::new(
+            PluginId::new("dev.example.a-init-task").unwrap(),
+            Version::new(1, 0, 0),
+        )
+        .require(CapabilityRequirement::exactly_one(
+            CapabilityId::new(TokioTasksCapability::ID).unwrap(),
+            VersionReq::parse("^1.0").unwrap(),
+        ))
+        .unwrap();
+        Self { descriptor, dropped }
+    }
+}
+
+impl Plugin for InitTaskPlugin {
+    fn descriptor(&self) -> &PluginDescriptor {
+        &self.descriptor
+    }
+
+    fn initialize<'a>(
+        &'a mut self,
+        context: InitializationContext<'a>,
+    ) -> BoxFuture<'a, Result<ProvisionSet, PluginError>> {
+        let tasks = context.require::<TokioTasksCapability>();
+        let dropped = Arc::clone(&self.dropped);
+        Box::pin(async move {
+            let tasks = tasks.map_err(|error| PluginError::new(error.tag(), error.to_string()))?;
+            let task_name = TaskName::new("init-stubborn")
+                .map_err(|error| PluginError::new(error.tag(), error.to_string()))?;
+            tasks
+                .spawn(
+                    task_name,
+                    Box::pin(async move {
+                        let _probe = DropProbe(dropped);
+                        pending::<()>().await;
+                    }),
+                )
+                .map_err(|error| PluginError::new(error.tag(), error.to_string()))?;
+            tokio::task::yield_now().await;
+            Ok(ProvisionSet::new())
+        })
+    }
+}
+
+struct InitFailurePlugin {
+    descriptor: PluginDescriptor,
+}
+
+impl InitFailurePlugin {
+    fn new() -> Self {
+        let descriptor = PluginDescriptor::new(
+            PluginId::new("dev.example.z-init-failure").unwrap(),
+            Version::new(1, 0, 0),
+        )
+        .require(CapabilityRequirement::exactly_one(
+            CapabilityId::new(TokioTasksCapability::ID).unwrap(),
+            VersionReq::parse("^1.0").unwrap(),
+        ))
+        .unwrap();
+        Self { descriptor }
+    }
+}
+
+impl Plugin for InitFailurePlugin {
+    fn descriptor(&self) -> &PluginDescriptor {
+        &self.descriptor
+    }
+
+    fn initialize<'a>(
+        &'a mut self,
+        _context: InitializationContext<'a>,
+    ) -> BoxFuture<'a, Result<ProvisionSet, PluginError>> {
+        Box::pin(async { Err(PluginError::new("init.failed", "injected initialization failure")) })
     }
 }
 
@@ -144,6 +229,31 @@ async fn panicking_task_fails_closed_without_retaining_its_payload() {
     assert_eq!(report.failures.len(), 1);
     assert_eq!(report.failures[0].error_tag, "tokio-task.panicked");
     assert!(!report.failures[0].message.contains("sentinel-secret"));
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn initialization_rollback_drains_tasks_before_returning() {
+    let plugin = TokioTaskPlugin::new(TokioTaskConfig {
+        max_tasks: 8,
+        drain_timeout: Duration::from_secs(1),
+    })
+    .unwrap();
+    let dropped = Arc::new(AtomicBool::new(false));
+    let result = AppBuilder::new()
+        .host_capability(tokio_runtime_capability().unwrap())
+        .plugin(plugin)
+        .plugin(InitTaskPlugin::new(Arc::clone(&dropped)))
+        .plugin(InitFailurePlugin::new())
+        .resolve()
+        .unwrap()
+        .start()
+        .await;
+
+    let failure = result.err().expect("initialization must fail");
+    assert_eq!(failure.primary.error_tag, "init.failed");
+    assert_eq!(failure.cleanup_failures.len(), 1);
+    assert_eq!(failure.cleanup_failures[0].error_tag, "tokio-task.drain-timeout");
+    assert!(dropped.load(Ordering::Acquire));
 }
 
 #[test]
