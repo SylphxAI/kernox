@@ -2,6 +2,8 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
+    fs,
+    path::Path,
     process::{Command, ExitCode},
 };
 
@@ -14,6 +16,9 @@ const RELEASE_ORDER: &[&str] = &[
     "kernox",
     "cargo-kernox",
 ];
+const FORBIDDEN_HOSTED_LABELS: [&str; 3] = ["ubuntu-latest", "macos-latest", "windows-latest"];
+const APPROVED_RUNNERS: [&str; 2] =
+    ["sylphx-linux-standard", "[self-hosted, sylphx, macos, standard]"];
 
 fn main() -> ExitCode {
     let mut arguments = std::env::args().skip(1);
@@ -41,6 +46,8 @@ fn main() -> ExitCode {
 }
 
 fn verify() -> Result<(), String> {
+    println!("verify.workflow-runner-authority");
+    enforce_workflow_runner_boundary()?;
     run("format", "cargo", &["fmt", "--all", "--", "--check"], &[])?;
     run(
         "check",
@@ -288,6 +295,58 @@ fn is_crates_io_publishable(package: &serde_json::Value) -> bool {
         }
         _ => false,
     }
+}
+
+fn enforce_workflow_runner_boundary() -> Result<(), String> {
+    let workflow_dir = Path::new(".github/workflows");
+    let mut workflow_paths = Vec::new();
+    for entry in fs::read_dir(workflow_dir)
+        .map_err(|error| format!("could not read {}: {error}", workflow_dir.display()))?
+    {
+        let path =
+            entry.map_err(|error| format!("could not inspect workflow entry: {error}"))?.path();
+        if matches!(path.extension().and_then(|extension| extension.to_str()), Some("yml" | "yaml"))
+        {
+            workflow_paths.push(path);
+        }
+    }
+    workflow_paths.sort();
+    if workflow_paths.is_empty() {
+        return Err(format!("no workflow files found under {}", workflow_dir.display()));
+    }
+
+    for path in workflow_paths {
+        let source = fs::read_to_string(&path)
+            .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+        for label in FORBIDDEN_HOSTED_LABELS {
+            if source.contains(label) {
+                return Err(format!(
+                    "{} contains forbidden GitHub-hosted runner label {label}",
+                    path.display()
+                ));
+            }
+        }
+
+        let mut declarations = 0;
+        for (index, line) in source.lines().enumerate() {
+            let Some(value) = line.trim().strip_prefix("runs-on:") else {
+                continue;
+            };
+            declarations += 1;
+            let value = value.trim();
+            if !APPROVED_RUNNERS.contains(&value) {
+                return Err(format!(
+                    "{}:{} declares unsupported runs-on {value:?}; use one static approved Sylphx profile",
+                    path.display(),
+                    index + 1
+                ));
+            }
+        }
+        if declarations == 0 {
+            return Err(format!("{} declares no runner profile", path.display()));
+        }
+    }
+    Ok(())
 }
 
 fn run(
