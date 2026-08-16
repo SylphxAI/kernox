@@ -92,8 +92,9 @@ package that owns those resources.
 - A long-lived Host starts one App Scope, accepts work only after readiness,
   stops new work during quiesce, drains, then shuts down.
 - A serverless Host may reuse one App Scope across warm invocations and creates
-  a fresh Invocation Scope for every call. Correctness never depends on a
-  shutdown callback.
+  a fresh Invocation Scope for every admitted call. An already-elapsed platform
+  deadline is rejected before user code runs; in-flight cancellation remains a
+  provider/runtime concern. Correctness never depends on a shutdown callback.
 - A Tokio Host reports tasks that exceed the cooperative drain budget only
   after forced abort has destroyed their tracked futures.
 - The deterministic testkit records lifecycle order and injects typed failures
