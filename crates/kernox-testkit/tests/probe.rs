@@ -70,6 +70,53 @@ fn initialization_failure_is_observed_and_disposed() {
 }
 
 #[test]
+fn partial_initialization_failure_disposes_current_and_prior_plugins_in_reverse() {
+    futures::executor::block_on(async {
+        let recorder = LifecycleRecorder::default();
+        let failing = ProbePlugin::new(descriptor_for("dev.example.gamma")).failures(FailurePlan {
+            initialize: Some(InjectedFailure {
+                tag: "probe.gamma-initialize-failed",
+                message: "injected",
+            }),
+            ..FailurePlan::default()
+        });
+        let result = AppBuilder::new()
+            .plugin(failing)
+            .plugin(ProbePlugin::new(descriptor_for("dev.example.beta")))
+            .plugin(ProbePlugin::new(descriptor_for("dev.example.alpha")))
+            .observation_sink(Arc::new(recorder.clone()))
+            .resolve()
+            .unwrap()
+            .start()
+            .await;
+        assert!(result.is_err(), "later initialization failure must roll back the partial app");
+        let error = result.err().expect("the partial initialization must fail");
+
+        assert_eq!(error.primary.error_tag, "probe.gamma-initialize-failed");
+        let events = recorder.snapshot();
+        assert_eq!(events.len(), 6);
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| (event.plugin.as_str(), event.phase, event.outcome))
+                .collect::<Vec<_>>(),
+            [
+                ("dev.example.alpha", LifecyclePhase::Initialize, LifecycleOutcome::Succeeded,),
+                ("dev.example.beta", LifecyclePhase::Initialize, LifecycleOutcome::Succeeded,),
+                (
+                    "dev.example.gamma",
+                    LifecyclePhase::Initialize,
+                    LifecycleOutcome::Failed { error_tag: "probe.gamma-initialize-failed" },
+                ),
+                ("dev.example.gamma", LifecyclePhase::Dispose, LifecycleOutcome::Succeeded),
+                ("dev.example.beta", LifecyclePhase::Dispose, LifecycleOutcome::Succeeded),
+                ("dev.example.alpha", LifecyclePhase::Dispose, LifecycleOutcome::Succeeded),
+            ]
+        );
+    });
+}
+
+#[test]
 fn shutdown_preserves_every_cleanup_failure_and_is_idempotent() {
     futures::executor::block_on(async {
         let recorder = LifecycleRecorder::default();
@@ -102,5 +149,9 @@ fn shutdown_preserves_every_cleanup_failure_and_is_idempotent() {
 }
 
 fn descriptor() -> PluginDescriptor {
-    PluginDescriptor::new(PluginId::new("dev.example.probe").unwrap(), Version::new(1, 0, 0))
+    descriptor_for("dev.example.probe")
+}
+
+fn descriptor_for(plugin: &str) -> PluginDescriptor {
+    PluginDescriptor::new(PluginId::new(plugin).unwrap(), Version::new(1, 0, 0))
 }

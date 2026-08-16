@@ -32,6 +32,19 @@ scope identities parented to the warm application, clean shutdown, and closed
 post-shutdown admission. It is host/lifecycle evidence, not deployment or live
 adoption evidence.
 
+The same standalone consumer can exercise typed cardinality contracts through
+two independently implemented notifier providers:
+
+```text
+cargo run --locked --manifest-path fixtures/clean-consumer/Cargo.toml -- --fanout
+```
+
+The fan-out application uses `all` for a required multi-provider capability and
+`optional` for an intentionally absent metrics capability. It verifies stable
+provider order, direct typed dispatch, and clean shutdown. This remains
+source-level adopter evidence only; it is not registry, deployment, live
+adoption, SLA, or stable 1.0 evidence.
+
 Passing this fixture proves source-level consumer integration. It does not
 prove registry publication, independent legal ownership, deployment, or live
 adoption; those remain separate North Star facts.

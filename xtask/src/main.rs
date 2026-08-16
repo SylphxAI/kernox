@@ -114,10 +114,27 @@ fn verify() -> Result<(), String> {
         ],
         &[],
     )?;
+    verify_clean_consumer_fanout()?;
     run("dependency-policy", "cargo", &["deny", "check"], &[])?;
     run("advisories", "cargo", &["audit", "--deny", "warnings"], &[])?;
     run("core-package", "cargo", &["package", "--locked", "-p", "kernox-core"], &[])?;
     Ok(())
+}
+
+fn verify_clean_consumer_fanout() -> Result<(), String> {
+    run(
+        "clean-consumer-fanout",
+        "cargo",
+        &[
+            "run",
+            "--locked",
+            "--manifest-path",
+            "fixtures/clean-consumer/Cargo.toml",
+            "--",
+            "--fanout",
+        ],
+        &[],
+    )
 }
 
 fn run(

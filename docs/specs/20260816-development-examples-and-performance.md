@@ -29,7 +29,8 @@ The repository keeps one reference application per distinct composition shape:
    showing named admission, cancellation, and clean drain on shutdown.
 4. `fixtures/clean-consumer`: a standalone public-facade consumer outside the
    root workspace, exercising both direct long-lived calls and the
-   provider-neutral warm host with fresh invocation scopes.
+   provider-neutral warm host with fresh invocation scopes, plus a multi-provider
+   fan-out composition using required and optional typed cardinalities.
 
 Each example owns its domain traits and plugin descriptors. Kernox supplies
 graph validation, typed injection, lifecycle ownership, and host boundaries;
@@ -66,5 +67,8 @@ single noisy sample moves.
 - `fixtures/clean-consumer --serverless` proves the same typed graph through a
   warm host, capacity rejection, handler-failure cleanup, fresh scope
   parenting, and closed post-shutdown admission.
+- `fixtures/clean-consumer --fanout` proves an external consumer can inject
+  multiple providers through `all`, observe an absent optional capability
+  through `optional`, and retain direct typed notifier handles after boot.
 - The benchmark report records distributions and environment, and documents
   unmeasured dimensions instead of claiming universal optimality.

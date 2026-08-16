@@ -17,7 +17,7 @@ use kernox::serverless::{
 use kernox::{
     AppBuilder, BoxFuture, Capability, CapabilityId, CapabilityOffer, CapabilityRequirement,
     InitializationContext, Plugin, PluginDescriptor, PluginError, PluginId, ProvisionSet,
-    ResolvedApp,
+    RequirementCardinality, ResolvedApp,
 };
 use kernox_testkit::verify_application;
 use semver::{Version, VersionReq};
@@ -26,9 +26,15 @@ const CONTRACT_VERSION: &str = "1.0.0";
 const CLOCK_PLUGIN_ID: &str = "dev.kernox.clean-consumer.clock";
 const GREETING_PLUGIN_ID: &str = "dev.kernox.clean-consumer.greeting";
 const APP_PLUGIN_ID: &str = "dev.kernox.clean-consumer.application";
+const EMAIL_NOTIFIER_PLUGIN_ID: &str = "dev.kernox.clean-consumer.notifier-email";
+const WEBHOOK_NOTIFIER_PLUGIN_ID: &str = "dev.kernox.clean-consumer.notifier-webhook";
+const FANOUT_PLUGIN_ID: &str = "dev.kernox.clean-consumer.fanout";
 const CLOCK_CAPABILITY_ID: &str = "dev.kernox.clean-consumer.clock";
 const GREETING_CAPABILITY_ID: &str = "dev.kernox.clean-consumer.greeting";
 const APP_CAPABILITY_ID: &str = "dev.kernox.clean-consumer.application";
+const NOTIFIER_CAPABILITY_ID: &str = "dev.kernox.clean-consumer.notifier";
+const METRICS_CAPABILITY_ID: &str = "dev.kernox.clean-consumer.metrics";
+const FANOUT_CAPABILITY_ID: &str = "dev.kernox.clean-consumer.fanout";
 const EXPECTED_MESSAGE: &str = "hello, Kernox @42ms";
 const WORKLOAD_WORKERS: usize = 4;
 const WORKLOAD_OPERATIONS_PER_WORKER: usize = 512;
@@ -200,11 +206,170 @@ impl Application for ApplicationService {
     }
 }
 
+trait Notifier: Send + Sync {
+    fn notify(&self, message: &str) -> String;
+}
+
+struct NotifierCapability;
+
+impl Capability for NotifierCapability {
+    type Interface = dyn Notifier;
+
+    const ID: &'static str = NOTIFIER_CAPABILITY_ID;
+    const VERSION: &'static str = CONTRACT_VERSION;
+}
+
+trait Metrics: Send + Sync {}
+
+struct MetricsCapability;
+
+impl Capability for MetricsCapability {
+    type Interface = dyn Metrics;
+
+    const ID: &'static str = METRICS_CAPABILITY_ID;
+    const VERSION: &'static str = CONTRACT_VERSION;
+}
+
+trait Fanout: Send + Sync {
+    fn dispatch(&self, message: &str) -> Vec<String>;
+    fn metrics_enabled(&self) -> bool;
+}
+
+struct FanoutCapability;
+
+impl Capability for FanoutCapability {
+    type Interface = dyn Fanout;
+
+    const ID: &'static str = FANOUT_CAPABILITY_ID;
+    const VERSION: &'static str = CONTRACT_VERSION;
+}
+
+struct NotifierPlugin {
+    descriptor: PluginDescriptor,
+    channel: &'static str,
+}
+
+impl NotifierPlugin {
+    fn new(id: &str, package: &str, channel: &'static str) -> Result<Self, Box<dyn Error>> {
+        let descriptor = descriptor(id, package)?.provide(CapabilityOffer::new(
+            capability_id(NOTIFIER_CAPABILITY_ID)?,
+            version()?,
+        ))?;
+        Ok(Self { descriptor, channel })
+    }
+}
+
+impl Plugin for NotifierPlugin {
+    fn descriptor(&self) -> &PluginDescriptor {
+        &self.descriptor
+    }
+
+    fn initialize<'a>(
+        &'a mut self,
+        _context: InitializationContext<'a>,
+    ) -> BoxFuture<'a, Result<ProvisionSet, PluginError>> {
+        let channel = self.channel;
+        Box::pin(async move {
+            ProvisionSet::new()
+                .provide::<NotifierCapability>(Arc::new(FixedNotifier { channel }))
+                .map_err(provision_failure)
+        })
+    }
+}
+
+struct FixedNotifier {
+    channel: &'static str,
+}
+
+impl Notifier for FixedNotifier {
+    fn notify(&self, message: &str) -> String {
+        format!("{}:{message}", self.channel)
+    }
+}
+
+struct FanoutPlugin {
+    descriptor: PluginDescriptor,
+}
+
+impl FanoutPlugin {
+    fn new() -> Result<Self, Box<dyn Error>> {
+        let descriptor = descriptor(FANOUT_PLUGIN_ID, "consumer-fanout")?
+            .provide(CapabilityOffer::new(capability_id(FANOUT_CAPABILITY_ID)?, version()?))?
+            .require(CapabilityRequirement::new(
+                capability_id(METRICS_CAPABILITY_ID)?,
+                VersionReq::parse("^1.0")?,
+                RequirementCardinality::ZeroOrOne,
+            ))?
+            .require(CapabilityRequirement::new(
+                capability_id(NOTIFIER_CAPABILITY_ID)?,
+                VersionReq::parse("^1.0")?,
+                RequirementCardinality::OneOrMore,
+            ))?;
+        Ok(Self { descriptor })
+    }
+}
+
+impl Plugin for FanoutPlugin {
+    fn descriptor(&self) -> &PluginDescriptor {
+        &self.descriptor
+    }
+
+    fn initialize<'a>(
+        &'a mut self,
+        context: InitializationContext<'a>,
+    ) -> BoxFuture<'a, Result<ProvisionSet, PluginError>> {
+        let notifiers = context.all::<NotifierCapability>();
+        let metrics = context.optional::<MetricsCapability>();
+        Box::pin(async move {
+            let notifiers = notifiers.map_err(access_failure)?;
+            let metrics = metrics.map_err(access_failure)?;
+            ProvisionSet::new()
+                .provide::<FanoutCapability>(Arc::new(FanoutService {
+                    notifiers,
+                    metrics_enabled: metrics.is_some(),
+                }))
+                .map_err(provision_failure)
+        })
+    }
+}
+
+struct FanoutService {
+    notifiers: Vec<Arc<dyn Notifier>>,
+    metrics_enabled: bool,
+}
+
+impl Fanout for FanoutService {
+    fn dispatch(&self, message: &str) -> Vec<String> {
+        self.notifiers.iter().map(|notifier| notifier.notify(message)).collect()
+    }
+
+    fn metrics_enabled(&self) -> bool {
+        self.metrics_enabled
+    }
+}
+
 fn compose() -> Result<ResolvedApp, Box<dyn Error>> {
     AppBuilder::new()
         .plugin(ApplicationPlugin::new()?)
         .plugin(GreetingPlugin::new()?)
         .plugin(ClockPlugin::new()?)
+        .resolve()
+        .map_err(Into::into)
+}
+
+fn compose_fanout() -> Result<ResolvedApp, Box<dyn Error>> {
+    AppBuilder::new()
+        .plugin(FanoutPlugin::new()?)
+        .plugin(NotifierPlugin::new(
+            EMAIL_NOTIFIER_PLUGIN_ID,
+            "consumer-notifier-email",
+            "email",
+        )?)
+        .plugin(NotifierPlugin::new(
+            WEBHOOK_NOTIFIER_PLUGIN_ID,
+            "consumer-notifier-webhook",
+            "webhook",
+        )?)
         .resolve()
         .map_err(Into::into)
 }
@@ -391,6 +556,34 @@ async fn run_serverless() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+async fn run_fanout() -> Result<(), Box<dyn Error>> {
+    let mut running = compose_fanout()?.start().await?;
+    let fanout =
+        running.capability_from::<FanoutCapability>(&PluginId::new(FANOUT_PLUGIN_ID)?)?;
+    if fanout.metrics_enabled() {
+        return Err("fanout consumer unexpectedly resolved an absent optional metrics provider".into());
+    }
+    let deliveries = fanout.dispatch("order.created");
+    if deliveries != ["email:order.created", "webhook:order.created"] {
+        return Err(format!("fanout consumer produced unexpected deliveries: {deliveries:?}").into());
+    }
+    drop(fanout);
+
+    let shutdown = running.shutdown().await;
+    if !shutdown.is_clean() {
+        return Err(format!(
+            "fanout consumer shutdown had {} failure(s)",
+            shutdown.failures.len()
+        )
+        .into());
+    }
+    println!(
+        "clean consumer fanout: providers={} optional_metrics=absent dispatch=deterministic",
+        deliveries.len()
+    );
+    Ok(())
+}
+
 fn measure_workload(application: &Arc<dyn Application>) -> Result<Vec<u64>, Box<dyn Error>> {
     let samples = thread::scope(|scope| {
         let start_barrier = Arc::new(Barrier::new(WORKLOAD_WORKERS));
@@ -437,6 +630,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     match std::env::args().nth(1).as_deref() {
         Some("--workload") => block_on(run_workload()),
         Some("--serverless") => block_on(run_serverless()),
+        Some("--fanout") => block_on(run_fanout()),
         _ => block_on(run_smoke()),
     }
 }

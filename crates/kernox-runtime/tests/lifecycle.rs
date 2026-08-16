@@ -153,6 +153,47 @@ struct ConsumerPlugin {
     use_wrong_marker: bool,
 }
 
+#[derive(Clone, Copy)]
+enum CardinalityAccessMode {
+    Optional,
+    All,
+}
+
+struct CardinalityAccessPlugin {
+    descriptor: PluginDescriptor,
+    mode: CardinalityAccessMode,
+}
+
+impl CardinalityAccessPlugin {
+    fn new(id: &str, mode: CardinalityAccessMode) -> Self {
+        let descriptor = PluginDescriptor::new(plugin_id(id), version())
+            .require(CapabilityRequirement::exactly_one(
+                capability_id(ClockCapability::ID),
+                VersionReq::parse("^1.0").unwrap(),
+            ))
+            .unwrap();
+        Self { descriptor, mode }
+    }
+}
+
+impl Plugin for CardinalityAccessPlugin {
+    fn descriptor(&self) -> &PluginDescriptor {
+        &self.descriptor
+    }
+
+    fn initialize<'a>(
+        &'a mut self,
+        context: InitializationContext<'a>,
+    ) -> BoxFuture<'a, Result<ProvisionSet, PluginError>> {
+        let result = match self.mode {
+            CardinalityAccessMode::Optional => context.optional::<ClockCapability>().map(|_| ()),
+            CardinalityAccessMode::All => context.all::<ClockCapability>().map(|_| ()),
+        };
+        let result = result.map_err(|error| PluginError::new(error.tag(), error.to_string()));
+        Box::pin(async move { result.map(|()| ProvisionSet::new()) })
+    }
+}
+
 impl ConsumerPlugin {
     fn new(events: Arc<Mutex<Vec<String>>>) -> Self {
         let descriptor = PluginDescriptor::new(plugin_id("dev.example.consumer"), version())
@@ -472,6 +513,28 @@ fn dependency_access_mode_must_match_declared_cardinality() {
             .expect("wrong access mode must fail");
 
         assert_eq!(error.primary.error_tag, "access.cardinality-mismatch");
+    });
+}
+
+#[test]
+fn optional_and_all_reject_single_provider_requirements() {
+    block_on(async {
+        for (id, mode) in [
+            ("dev.example.optional-access", CardinalityAccessMode::Optional),
+            ("dev.example.all-access", CardinalityAccessMode::All),
+        ] {
+            let error = AppBuilder::new()
+                .plugin(CardinalityAccessPlugin::new(id, mode))
+                .plugin(ClockPlugin::new(Arc::new(Mutex::new(Vec::new()))))
+                .resolve()
+                .unwrap()
+                .start()
+                .await
+                .err()
+                .expect("the access mode must fail closed");
+
+            assert_eq!(error.primary.error_tag, "access.cardinality-mismatch");
+        }
     });
 }
 
