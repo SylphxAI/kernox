@@ -250,7 +250,7 @@ fn release_check(arguments: &[String]) -> Result<(), String> {
             }
         }
     }
-    if !std::path::Path::new("Cargo.lock").is_file() {
+    if !Path::new("Cargo.lock").is_file() {
         return Err("Cargo.lock is required for a reproducible release".to_owned());
     }
     println!("release.check version={version} packages={}", RELEASE_ORDER.join(","));
