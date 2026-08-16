@@ -11,11 +11,13 @@ use std::{
     time::Duration,
 };
 
+use kernox_core::CapabilityId;
 use kernox_host_tokio::{
-    SpawnError, TaskName, TokioTaskConfig, TokioTaskPlugin, TokioTasksCapability,
-    tokio_task_plugin_id,
+    SpawnError, TOKIO_RUNTIME_CAPABILITY_ID, TaskName, TokioTaskConfig, TokioTaskPlugin,
+    TokioTasksCapability, tokio_runtime_capability, tokio_task_plugin_id,
 };
-use kernox_runtime::AppBuilder;
+use kernox_runtime::{AppBuilder, HostCapability};
+use semver::Version;
 
 struct DropProbe(Arc<AtomicBool>);
 
@@ -32,7 +34,14 @@ async fn cooperative_task_observes_cancellation_and_drains() {
         drain_timeout: Duration::from_secs(1),
     })
     .unwrap();
-    let mut app = AppBuilder::new().plugin(plugin).resolve().unwrap().start().await.unwrap();
+    let mut app = AppBuilder::new()
+        .host_capability(tokio_runtime_capability().unwrap())
+        .plugin(plugin)
+        .resolve()
+        .unwrap()
+        .start()
+        .await
+        .unwrap();
     let tasks =
         app.capability_from::<TokioTasksCapability>(&tokio_task_plugin_id().unwrap()).unwrap();
     let cancellation = tasks.cancellation_token();
@@ -60,7 +69,14 @@ async fn stubborn_task_is_named_reported_and_force_aborted() {
         drain_timeout: Duration::from_secs(5),
     })
     .unwrap();
-    let mut app = AppBuilder::new().plugin(plugin).resolve().unwrap().start().await.unwrap();
+    let mut app = AppBuilder::new()
+        .host_capability(tokio_runtime_capability().unwrap())
+        .plugin(plugin)
+        .resolve()
+        .unwrap()
+        .start()
+        .await
+        .unwrap();
     let tasks =
         app.capability_from::<TokioTasksCapability>(&tokio_task_plugin_id().unwrap()).unwrap();
     let dropped = Arc::new(AtomicBool::new(false));
@@ -95,7 +111,14 @@ async fn panicking_task_fails_closed_without_retaining_its_payload() {
         drain_timeout: Duration::from_secs(1),
     })
     .unwrap();
-    let mut app = AppBuilder::new().plugin(plugin).resolve().unwrap().start().await.unwrap();
+    let mut app = AppBuilder::new()
+        .host_capability(tokio_runtime_capability().unwrap())
+        .plugin(plugin)
+        .resolve()
+        .unwrap()
+        .start()
+        .await
+        .unwrap();
     let tasks =
         app.capability_from::<TokioTasksCapability>(&tokio_task_plugin_id().unwrap()).unwrap();
     let cancellation = tasks.cancellation_token();
@@ -128,7 +151,14 @@ fn malformed_names_and_missing_runtime_fail_without_spawning() {
     assert_eq!(TaskName::new("").unwrap_err(), SpawnError::InvalidName);
     let plugin = TokioTaskPlugin::new(TokioTaskConfig::default()).unwrap();
     let app = futures::executor::block_on(async {
-        AppBuilder::new().plugin(plugin).resolve().unwrap().start().await.unwrap()
+        AppBuilder::new()
+            .host_capability(tokio_runtime_capability().unwrap())
+            .plugin(plugin)
+            .resolve()
+            .unwrap()
+            .start()
+            .await
+            .unwrap()
     });
     let tasks =
         app.capability_from::<TokioTasksCapability>(&tokio_task_plugin_id().unwrap()).unwrap();
@@ -138,4 +168,23 @@ fn malformed_names_and_missing_runtime_fail_without_spawning() {
         SpawnError::NoRuntime
     );
     assert!(Arc::strong_count(&tasks) >= 2);
+}
+
+#[test]
+fn host_runtime_requirement_fails_before_readiness_and_checks_version() {
+    let missing = TokioTaskPlugin::new(TokioTaskConfig::default()).unwrap();
+    let error = AppBuilder::new().plugin(missing).resolve().err().expect("host must be declared");
+    assert_eq!(error.tag(), "host.missing-capability");
+
+    let incompatible = TokioTaskPlugin::new(TokioTaskConfig::default()).unwrap();
+    let error = AppBuilder::new()
+        .host_capability(HostCapability::new(
+            CapabilityId::new(TOKIO_RUNTIME_CAPABILITY_ID).unwrap(),
+            Version::new(2, 0, 0),
+        ))
+        .plugin(incompatible)
+        .resolve()
+        .err()
+        .expect("host version must match");
+    assert_eq!(error.tag(), "host.incompatible-capability");
 }

@@ -30,6 +30,7 @@ pub use kernox_core::{
     PluginDescriptor, PluginId, RequirementCardinality,
 };
 pub use kernox_runtime::{
-    AppBuilder, BoxFuture, Capability, InitializationContext, LifecycleContext, Plugin,
-    PluginError, ProvisionSet, ResolvedApp, RunningApp,
+    AppBuilder, AppResolveError, BoxFuture, Capability, HostCapability, HostRequirement,
+    HostResolutionError, InitializationContext, LifecycleContext, Plugin, PluginError,
+    ProvisionSet, ResolvedApp, RunningApp,
 };

@@ -1,5 +1,9 @@
 use std::{
-    collections::BTreeMap, future::Future, marker::PhantomData, panic::AssertUnwindSafe, sync::Arc,
+    collections::{BTreeMap, BTreeSet},
+    future::Future,
+    marker::PhantomData,
+    panic::AssertUnwindSafe,
+    sync::Arc,
     time::Instant,
 };
 
@@ -10,7 +14,8 @@ use crate::capability::{Registry, root_capability};
 use crate::observation::default_sink;
 use crate::scope::Scope;
 use crate::{
-    AccessError, FailureRecord, InitializationContext, LifecycleContext, LifecycleFailure,
+    AccessError, AppResolveError, FailureRecord, HostCapability, HostRequirement,
+    HostResolutionError, InitializationContext, LifecycleContext, LifecycleFailure,
     LifecycleObservation, LifecycleOutcome, LifecyclePhase, ObservationSink, Plugin, PluginError,
     ScopeError, ScopeKind, ScopeView, ShutdownReport,
 };
@@ -22,6 +27,7 @@ pub struct AppBuilder {
     bindings: Vec<Binding>,
     limits: GraphLimits,
     observer: Option<Arc<dyn ObservationSink>>,
+    host_capabilities: Vec<HostCapability>,
 }
 
 impl AppBuilder {
@@ -59,27 +65,41 @@ impl AppBuilder {
         self
     }
 
+    /// Declares one versioned property supplied by the selected Host.
+    #[must_use]
+    pub fn host_capability(mut self, capability: HostCapability) -> Self {
+        self.host_capabilities.push(capability);
+        self
+    }
+
     /// Resolves and validates the immutable capability graph without running I/O.
     ///
     /// # Errors
     ///
-    /// Returns [`ResolveError`] when identities, dependencies, bindings,
-    /// conflicts, cycles, or resource limits are invalid.
-    pub fn resolve(self) -> Result<ResolvedApp, ResolveError> {
-        let Self { plugins, bindings, limits, observer } = self;
-        let declared: Vec<_> =
-            plugins.into_iter().map(|plugin| (plugin.descriptor().clone(), plugin)).collect();
+    /// Returns [`AppResolveError`] when identities, dependencies, bindings,
+    /// host requirements, conflicts, cycles, or resource limits are invalid.
+    pub fn resolve(self) -> Result<ResolvedApp, AppResolveError> {
+        let Self { plugins, bindings, limits, observer, host_capabilities } = self;
+        let declared: Vec<_> = plugins
+            .into_iter()
+            .map(|plugin| {
+                let descriptor = plugin.descriptor().clone();
+                let host_requirements = plugin.host_requirements();
+                (descriptor, plugin, host_requirements)
+            })
+            .collect();
         let mut graph_builder = GraphBuilder::new().with_limits(limits);
-        for (descriptor, _) in &declared {
+        for (descriptor, _, _) in &declared {
             graph_builder = graph_builder.plugin(descriptor.clone());
         }
         for binding in bindings {
             graph_builder = graph_builder.binding(binding);
         }
         let graph = Arc::new(graph_builder.resolve()?);
+        validate_host_requirements(&declared, &host_capabilities)?;
         let plugins = declared
             .into_iter()
-            .map(|(descriptor, plugin)| (descriptor.id().clone(), plugin))
+            .map(|(descriptor, plugin, _)| (descriptor.id().clone(), plugin))
             .collect();
 
         Ok(ResolvedApp {
@@ -89,6 +109,48 @@ impl AppBuilder {
             scope: Scope::application(),
         })
     }
+}
+
+fn validate_host_requirements(
+    declared: &[(kernox_core::PluginDescriptor, Box<dyn Plugin>, Vec<HostRequirement>)],
+    supplied: &[HostCapability],
+) -> Result<(), HostResolutionError> {
+    let mut capabilities = BTreeMap::new();
+    for capability in supplied {
+        if capabilities.insert(capability.id().clone(), capability.version().clone()).is_some() {
+            return Err(HostResolutionError::DuplicateCapability {
+                capability: capability.id().clone(),
+            });
+        }
+    }
+
+    for (descriptor, _, requirements) in declared {
+        let mut seen = BTreeSet::new();
+        for requirement in requirements {
+            if !seen.insert(requirement.id().clone()) {
+                return Err(HostResolutionError::DuplicateRequirement {
+                    plugin: descriptor.id().clone(),
+                    capability: requirement.id().clone(),
+                });
+            }
+            let Some(version) = capabilities.get(requirement.id()) else {
+                return Err(HostResolutionError::Missing {
+                    plugin: descriptor.id().clone(),
+                    capability: requirement.id().clone(),
+                    requirement: requirement.version().clone(),
+                });
+            };
+            if !requirement.version().matches(version) {
+                return Err(HostResolutionError::Incompatible {
+                    plugin: descriptor.id().clone(),
+                    capability: requirement.id().clone(),
+                    requirement: requirement.version().clone(),
+                    available: vec![version.clone()],
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Validated application that has not performed plugin I/O.

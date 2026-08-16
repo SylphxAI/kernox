@@ -99,8 +99,10 @@ package that owns those resources.
 - The deterministic testkit records lifecycle order and injects typed failures
   without network or process signals; domain clocks remain ordinary test
   capabilities rather than kernel policy.
-- Host capability negotiation fails before readiness when a Plugin requires an
-  unsupported runtime property.
+- Host capability negotiation fails before readiness when a Plugin's
+  `host_requirements` are not satisfied by the selected Host's versioned
+  `HostCapability` declarations. These properties are negotiation metadata,
+  not injectable application provisions.
 
 ## Observability contract
 

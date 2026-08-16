@@ -11,16 +11,18 @@ use std::{
 use futures_util::FutureExt;
 use kernox_core::{CapabilityId, CapabilityOffer, DescriptorError, PluginDescriptor, PluginId};
 use kernox_runtime::{
-    BoxFuture, Capability, InitializationContext, LifecycleContext, Plugin, PluginError,
-    ProvisionSet,
+    BoxFuture, Capability, HostCapability, HostRequirement, InitializationContext,
+    LifecycleContext, Plugin, PluginError, ProvisionSet,
 };
-use semver::Version;
+use semver::{Version, VersionReq};
 use thiserror::Error;
 use tokio::{runtime::Handle, task::AbortHandle, time::timeout};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 const PLUGIN_ID: &str = "dev.kernox.host.tokio";
 const TASK_CAPABILITY_ID: &str = "dev.kernox.host.tokio.tasks";
+/// Host property identifying a Tokio runtime execution model.
+pub const TOKIO_RUNTIME_CAPABILITY_ID: &str = "dev.kernox.host.tokio.runtime";
 const CONTRACT_VERSION: &str = "1.0.0";
 const MAX_TASK_NAME_BYTES: usize = 128;
 
@@ -172,12 +174,16 @@ pub enum TokioTaskPluginError {
     /// A built-in stable identifier is invalid.
     #[error("built-in Tokio host identifier is invalid")]
     Identifier,
+    /// A built-in semantic version is invalid.
+    #[error("built-in Tokio host version is invalid")]
+    Version(#[from] semver::Error),
 }
 
 /// Kernox plugin that publishes one application-scoped Tokio task supervisor.
 pub struct TokioTaskPlugin {
     descriptor: PluginDescriptor,
     config: TokioTaskConfig,
+    host_requirements: Vec<HostRequirement>,
     supervisor: Option<Arc<TaskSupervisor>>,
 }
 
@@ -195,17 +201,23 @@ impl TokioTaskPlugin {
         let id = PluginId::new(PLUGIN_ID).map_err(|_| TokioTaskPluginError::Identifier)?;
         let capability =
             CapabilityId::new(TASK_CAPABILITY_ID).map_err(|_| TokioTaskPluginError::Identifier)?;
-        let version =
-            Version::parse(CONTRACT_VERSION).map_err(|_| TokioTaskPluginError::Identifier)?;
+        let version = Version::parse(CONTRACT_VERSION)?;
+        let runtime = tokio_runtime_capability()?;
+        let host_requirements =
+            vec![HostRequirement::new(runtime.id().clone(), VersionReq::parse("^1.0")?)];
         let descriptor = PluginDescriptor::new(id, version.clone())
             .provide(CapabilityOffer::new(capability, version))?;
-        Ok(Self { descriptor, config, supervisor: None })
+        Ok(Self { descriptor, config, host_requirements, supervisor: None })
     }
 }
 
 impl Plugin for TokioTaskPlugin {
     fn descriptor(&self) -> &PluginDescriptor {
         &self.descriptor
+    }
+
+    fn host_requirements(&self) -> Vec<HostRequirement> {
+        self.host_requirements.clone()
     }
 
     fn initialize<'a>(
@@ -462,4 +474,21 @@ impl TokioTasks for TaskSupervisor {
 /// constant is invalid.
 pub fn tokio_task_plugin_id() -> Result<PluginId, kernox_core::IdentifierError> {
     PluginId::new(PLUGIN_ID)
+}
+
+/// Returns the host property a Tokio runtime supplies to compatible plugins.
+///
+/// The selected application Host must pass this capability to
+/// [`kernox_runtime::AppBuilder::host_capability`] before resolving a graph
+/// containing [`TokioTaskPlugin`].
+///
+/// # Errors
+///
+/// Returns a construction error only if this crate's built-in contract is
+/// invalid.
+pub fn tokio_runtime_capability() -> Result<HostCapability, TokioTaskPluginError> {
+    let id = CapabilityId::new(TOKIO_RUNTIME_CAPABILITY_ID)
+        .map_err(|_| TokioTaskPluginError::Identifier)?;
+    let version = Version::parse(CONTRACT_VERSION)?;
+    Ok(HostCapability::new(id, version))
 }

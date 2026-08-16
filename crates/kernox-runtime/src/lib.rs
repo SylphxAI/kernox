@@ -6,6 +6,7 @@
 mod app;
 mod capability;
 mod error;
+mod host;
 mod observation;
 mod plugin;
 mod scope;
@@ -13,9 +14,10 @@ mod scope;
 pub use app::{AppBuilder, InvocationScope, ResolvedApp, RunningApp};
 pub use capability::{Capability, CapabilityContract, InitializationContext, ProvisionSet};
 pub use error::{
-    AccessError, ContractError, FailureRecord, LifecycleFailure, PluginError, ProvisionError,
-    ShutdownReport,
+    AccessError, AppResolveError, ContractError, FailureRecord, LifecycleFailure, PluginError,
+    ProvisionError, ShutdownReport,
 };
+pub use host::{HostCapability, HostRequirement, HostResolutionError};
 pub use observation::{
     LifecycleObservation, LifecycleOutcome, LifecyclePhase, NoopObservationSink, ObservationSink,
 };
