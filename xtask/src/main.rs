@@ -81,6 +81,12 @@ fn verify() -> Result<(), String> {
         &["run", "--locked", "-p", "kernox-example-worker-app", "--bin", "worker"],
         &[],
     )?;
+    run(
+        "clean-consumer",
+        "cargo",
+        &["run", "--locked", "--manifest-path", "fixtures/clean-consumer/Cargo.toml"],
+        &[],
+    )?;
     run("dependency-policy", "cargo", &["deny", "check"], &[])?;
     run("advisories", "cargo", &["audit", "--deny", "warnings"], &[])?;
     run("core-package", "cargo", &["package", "--locked", "-p", "kernox-core"], &[])?;
