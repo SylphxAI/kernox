@@ -35,7 +35,6 @@ evidence are mature.
   and continues reverse cleanup.
 - Graph-level verified-application attribution in `kernox-core`, reused by the
   testkit and `cargo kernox check --verified`.
-- Graph-level verified-application attribution in `kernox-core`, reused by the
-  testkit and `cargo kernox check --verified`.
+- Compile-fail oracle that `InitializationContext` cannot escape as `'static`.
 
 [Unreleased]: https://github.com/SylphxAI/kernox/commits/main
