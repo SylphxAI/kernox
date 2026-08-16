@@ -889,6 +889,27 @@ mod tests {
     }
 
     #[test]
+    fn requirement_lookup_preserves_dependency_report_across_insertion_order() {
+        let clock = capability("dev.example.clock");
+        let provider = PluginDescriptor::new(plugin("dev.example.provider"), version())
+            .provide(CapabilityOffer::new(clock.clone(), version()))
+            .unwrap();
+        let consumer = PluginDescriptor::new(plugin("dev.example.consumer"), version())
+            .require(CapabilityRequirement::exactly_one(clock.clone(), requirement()))
+            .unwrap();
+
+        let forward = GraphBuilder::new()
+            .plugin(provider.clone())
+            .plugin(consumer.clone())
+            .resolve()
+            .unwrap();
+        let reverse = GraphBuilder::new().plugin(consumer).plugin(provider).resolve().unwrap();
+
+        assert_eq!(forward.report(), reverse.report());
+        assert!(reverse.requirement(&plugin("dev.example.consumer"), &clock).is_some());
+    }
+
+    #[test]
     fn returns_an_exact_cycle_path() {
         let cap_a = capability("dev.example.cap-a");
         let cap_b = capability("dev.example.cap-b");
