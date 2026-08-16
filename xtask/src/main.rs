@@ -5,16 +5,36 @@ use std::{
     process::{Command, ExitCode},
 };
 
+const RELEASE_ORDER: &[&str] = &[
+    "kernox-core",
+    "kernox-runtime",
+    "kernox-host-serverless",
+    "kernox-host-tokio",
+    "kernox-testkit",
+    "kernox",
+    "cargo-kernox",
+];
+
 fn main() -> ExitCode {
-    let command = std::env::args().nth(1);
-    if command.as_deref() != Some("verify") {
-        eprintln!("usage: cargo run -p xtask -- verify");
-        return ExitCode::from(2);
-    }
-    match verify() {
+    let mut arguments = std::env::args().skip(1);
+    let command = arguments.next();
+    let result = match command.as_deref() {
+        Some("verify") if arguments.next().is_none() => verify(),
+        Some("release-check") => {
+            let arguments = arguments.collect::<Vec<_>>();
+            release_check(&arguments)
+        }
+        _ => {
+            eprintln!(
+                "usage: cargo run -p xtask -- verify\n       cargo run -p xtask -- release-check [--version VERSION]"
+            );
+            return ExitCode::from(2);
+        }
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("verify.failed: {error}");
+            eprintln!("xtask.failed: {error}");
             ExitCode::from(1)
         }
     }
@@ -137,6 +157,139 @@ fn verify_clean_consumer_fanout() -> Result<(), String> {
     )
 }
 
+fn release_check(arguments: &[String]) -> Result<(), String> {
+    let expected_version = parse_release_version_argument(arguments)?;
+    let metadata = cargo_metadata()?;
+    let packages = metadata["packages"]
+        .as_array()
+        .ok_or_else(|| "cargo metadata packages missing".to_owned())?;
+    let workspace_members = metadata["workspace_members"]
+        .as_array()
+        .ok_or_else(|| "cargo metadata workspace members missing".to_owned())?;
+    let workspace_member_ids: BTreeSet<&str> =
+        workspace_members.iter().filter_map(serde_json::Value::as_str).collect();
+    let workspace_packages: BTreeMap<&str, &serde_json::Value> = packages
+        .iter()
+        .filter_map(|package| {
+            let id = package["id"].as_str()?;
+            workspace_member_ids.contains(id).then_some((package["name"].as_str()?, package))
+        })
+        .collect();
+
+    let release_names: BTreeSet<&str> = RELEASE_ORDER.iter().copied().collect();
+    let actual_publishable: BTreeSet<&str> = workspace_packages
+        .iter()
+        .filter_map(|(name, package)| is_crates_io_publishable(package).then_some(*name))
+        .collect();
+    if actual_publishable != release_names {
+        return Err(format!(
+            "publishable workspace packages do not match release order; expected {RELEASE_ORDER:?}, found {actual_publishable:?}"
+        ));
+    }
+
+    let first_package = workspace_packages
+        .get(RELEASE_ORDER[0])
+        .ok_or_else(|| "release package kernox-core missing from workspace".to_owned())?;
+    let version = first_package["version"]
+        .as_str()
+        .ok_or_else(|| "kernox-core version missing from cargo metadata".to_owned())?;
+    if !version.starts_with("0.") {
+        return Err(format!(
+            "stable 1.x publication is disabled during development; release version is {version}"
+        ));
+    }
+    if let Some(expected) = expected_version.as_deref() {
+        if version != expected {
+            return Err(format!("workspace version {version} does not match requested {expected}"));
+        }
+    }
+
+    let order: BTreeMap<&str, usize> =
+        RELEASE_ORDER.iter().enumerate().map(|(index, name)| (*name, index)).collect();
+    for name in RELEASE_ORDER {
+        let package = workspace_packages
+            .get(name)
+            .ok_or_else(|| format!("release package {name} missing from workspace"))?;
+        let package_version = package["version"]
+            .as_str()
+            .ok_or_else(|| format!("{name} version missing from cargo metadata"))?;
+        if package_version != version {
+            return Err(format!(
+                "release package {name} has version {package_version}, expected {version}"
+            ));
+        }
+        for field in ["description", "license", "repository", "readme"] {
+            let present = package[field].as_str().is_some_and(|value| !value.is_empty());
+            if !present {
+                return Err(format!(
+                    "release package {name} is missing package metadata field {field}"
+                ));
+            }
+        }
+        let dependencies = package["dependencies"]
+            .as_array()
+            .ok_or_else(|| format!("{name} dependencies missing from cargo metadata"))?;
+        for dependency in dependencies {
+            let Some(dependency_name) = dependency["name"].as_str() else {
+                continue;
+            };
+            let Some(dependency_index) = order.get(dependency_name) else {
+                continue;
+            };
+            if dependency["path"].as_str().is_some() && *dependency_index >= order[name] {
+                return Err(format!(
+                    "release order places {name} before its path dependency {dependency_name}"
+                ));
+            }
+        }
+    }
+    if !std::path::Path::new("Cargo.lock").is_file() {
+        return Err("Cargo.lock is required for a reproducible release".to_owned());
+    }
+    println!("release.check version={version} packages={}", RELEASE_ORDER.join(","));
+    Ok(())
+}
+
+fn parse_release_version_argument(arguments: &[String]) -> Result<Option<String>, String> {
+    let mut expected = None;
+    let mut index = 0;
+    while index < arguments.len() {
+        match arguments[index].as_str() {
+            "--version" => {
+                if expected.is_some() || index + 1 >= arguments.len() {
+                    return Err("release-check expects one --version VERSION argument".to_owned());
+                }
+                expected = Some(arguments[index + 1].clone());
+                index += 2;
+            }
+            argument => return Err(format!("unknown release-check argument {argument}")),
+        }
+    }
+    Ok(expected)
+}
+
+fn cargo_metadata() -> Result<serde_json::Value, String> {
+    let output = Command::new("cargo")
+        .args(["metadata", "--locked", "--format-version", "1"])
+        .output()
+        .map_err(|error| format!("could not inspect Cargo metadata: {error}"))?;
+    if !output.status.success() {
+        return Err("cargo metadata failed".to_owned());
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("invalid cargo metadata: {error}"))
+}
+
+fn is_crates_io_publishable(package: &serde_json::Value) -> bool {
+    match &package["publish"] {
+        serde_json::Value::Null => true,
+        serde_json::Value::Array(registries) => {
+            registries.iter().any(|registry| registry.as_str() == Some("crates-io"))
+        }
+        _ => false,
+    }
+}
+
 fn run(
     label: &str,
     program: &str,
@@ -154,15 +307,7 @@ fn run(
 }
 
 fn enforce_core_dependency_boundary() -> Result<(), String> {
-    let output = Command::new("cargo")
-        .args(["metadata", "--locked", "--format-version", "1"])
-        .output()
-        .map_err(|error| format!("could not inspect Cargo metadata: {error}"))?;
-    if !output.status.success() {
-        return Err("cargo metadata failed".to_owned());
-    }
-    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|error| format!("invalid cargo metadata: {error}"))?;
+    let metadata = cargo_metadata()?;
     let packages =
         metadata["packages"].as_array().ok_or_else(|| "metadata packages missing".to_owned())?;
     let names: BTreeMap<_, _> = packages
