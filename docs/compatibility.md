@@ -1,7 +1,15 @@
 # Compatibility policy
 
-Kernox public Rust crates follow Semantic Versioning. A stable 1.x release does
-not remove or incompatibly change public items without a major release.
+Kernox is intentionally pre-1.0 during the long engine-development phase. The
+workspace currently uses the `0.1.x` package train, and public APIs, lifecycle
+semantics, and descriptor/report contracts may still change between minor
+development releases. No stable 1.0 publication is allowed until the engine,
+examples, performance evidence, and adoption path have been reviewed as
+mature.
+
+Once a stable 1.x release is explicitly admitted, it will follow Semantic
+Versioning and will not remove or incompatibly change public items without a
+major release.
 Deprecations name a replacement and remain for at least one minor release
 before the next permitted major removal.
 

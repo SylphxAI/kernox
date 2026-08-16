@@ -1,6 +1,6 @@
 [package]
-name = "kernox-host-serverless"
-description = "Provider-neutral warm application and invocation isolation host for Kernox"
+name = "kernox-example-checkout-app"
+description = "Provider-binding checkout example for Kernox"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,16 +9,16 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
-keywords.workspace = true
-categories.workspace = true
+publish = false
 
 [dependencies]
-kernox-core.workspace = true
-kernox-runtime = { path = "../kernox-runtime", version = "0.1.0" }
+futures.workspace = true
+kernox = { path = "../../crates/kernox", version = "0.1.0" }
+semver.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-futures.workspace = true
+kernox-testkit = { path = "../../crates/kernox-testkit", version = "0.1.0" }
 
 [lints]
 workspace = true

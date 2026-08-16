@@ -20,9 +20,9 @@ full = ["serverless", "tokio"]
 
 [dependencies]
 kernox-core.workspace = true
-kernox-host-serverless = { path = "../kernox-host-serverless", version = "1.0.0", optional = true }
-kernox-host-tokio = { path = "../kernox-host-tokio", version = "1.0.0", optional = true }
-kernox-runtime = { path = "../kernox-runtime", version = "1.0.0" }
+kernox-host-serverless = { path = "../kernox-host-serverless", version = "0.1.0", optional = true }
+kernox-host-tokio = { path = "../kernox-host-tokio", version = "0.1.0", optional = true }
+kernox-runtime = { path = "../kernox-runtime", version = "0.1.0" }
 
 [dev-dependencies]
 criterion.workspace = true

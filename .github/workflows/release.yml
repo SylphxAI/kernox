@@ -36,6 +36,18 @@ jobs:
           expected="v$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "kernox") | .version')"
           test "${GITHUB_REF_NAME}" = "${expected}"
           git merge-base --is-ancestor "${GITHUB_SHA}" refs/remotes/origin/main
+      - name: Refuse stable 1.x publication during development
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          case "${version}" in
+            0.*) ;;
+            *)
+              echo "stable 1.x publication is intentionally disabled until the engine is admitted mature" >&2
+              exit 1
+              ;;
+          esac
       - name: Detect published predecessor
         id: predecessor
         shell: bash

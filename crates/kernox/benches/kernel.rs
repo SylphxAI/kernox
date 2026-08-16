@@ -113,6 +113,70 @@ fn indexed_requirement_lookup(criterion: &mut Criterion) {
     group.finish();
 }
 
+struct LifecyclePlugin {
+    descriptor: PluginDescriptor,
+}
+
+impl LifecyclePlugin {
+    fn new(index: usize) -> Self {
+        Self {
+            descriptor: PluginDescriptor::new(
+                PluginId::new(format!("dev.kernox.bench.lifecycle{index}")).unwrap(),
+                Version::new(1, 0, 0),
+            ),
+        }
+    }
+}
+
+impl Plugin for LifecyclePlugin {
+    fn descriptor(&self) -> &PluginDescriptor {
+        &self.descriptor
+    }
+
+    fn initialize<'a>(
+        &'a mut self,
+        _context: InitializationContext<'a>,
+    ) -> BoxFuture<'a, Result<ProvisionSet, PluginError>> {
+        Box::pin(async { Ok(ProvisionSet::new()) })
+    }
+}
+
+fn start_lifecycle_app(plugin_count: usize) -> kernox::RunningApp {
+    let mut builder = AppBuilder::new();
+    for index in 0..plugin_count {
+        builder = builder.plugin(LifecyclePlugin::new(index));
+    }
+    futures::executor::block_on(async { builder.resolve().unwrap().start().await.unwrap() })
+}
+
+fn lifecycle_boot_and_shutdown(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group("lifecycle-boot-shutdown");
+    for plugin_count in [1_usize, 3] {
+        group.bench_function(BenchmarkId::new("plugins", plugin_count), |bencher| {
+            bencher.iter(|| {
+                let mut app = start_lifecycle_app(plugin_count);
+                let report = futures::executor::block_on(app.shutdown());
+                assert!(report.is_clean());
+                black_box(report);
+            });
+        });
+    }
+    group.finish();
+}
+
+fn warm_invocation_scope(criterion: &mut Criterion) {
+    let mut app = start_lifecycle_app(3);
+    criterion.bench_function("warm-invocation-scope/open-close", |bencher| {
+        bencher.iter(|| {
+            let scope = app.invocation_scope().unwrap();
+            black_box(scope.view().id());
+            drop(scope);
+        });
+    });
+    let report = futures::executor::block_on(app.shutdown());
+    assert!(report.is_clean());
+}
+
 trait Compute: Send + Sync {
     fn apply(&self, value: u64) -> u64;
 }
@@ -194,5 +258,12 @@ fn steady_state_calls(criterion: &mut Criterion) {
     assert!(report.is_clean());
 }
 
-criterion_group!(benches, graph_resolution, indexed_requirement_lookup, steady_state_calls);
+criterion_group!(
+    benches,
+    graph_resolution,
+    indexed_requirement_lookup,
+    lifecycle_boot_and_shutdown,
+    warm_invocation_scope,
+    steady_state_calls
+);
 criterion_main!(benches);

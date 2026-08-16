@@ -42,3 +42,41 @@ Dense graph construction is intentionally a control-plane stress case. The
 below one second on this baseline. It is bounded by absolute
 node/declaration/edge ceilings and is not part of normal application request
 processing.
+
+## Development matrix — 2026-08-16
+
+The benchmark was expanded on the pre-1.0 development candidate with lifecycle
+and warm-scope paths:
+
+```text
+cargo bench --locked -p kernox --bench kernel -- \
+  --sample-size 10 --measurement-time 0.25 --warm-up-time 0.25
+```
+
+Environment: Linux 6.18.18 x86_64, AMD EPYC 9454, rustc 1.97.1. This short
+run is a diagnostic snapshot, not a replacement for the scheduled distribution
+baseline.
+
+| Path | Time |
+| --- | ---: |
+| 1-plugin boot + reverse shutdown | 1.764–1.828 µs |
+| 3-plugin boot + reverse shutdown | 4.038–4.249 µs |
+| Warm invocation scope open + close | 58.83–63.91 ns |
+| 256-requirement indexed lookup | 82.90–83.32 ns |
+
+A repeated 50-sample steady-state run measured direct dispatch at
+`1.3334–1.3446 ns` and a Kernox-extracted direct handle at `1.3325–1.3388 ns`
+in the same process. The point estimates were within 0.3%; an earlier run on
+the same machine showed a roughly 2% spread, which is why a single Criterion
+comparison is not treated as a product regression or an acceleration claim.
+
+## What this does not prove
+
+Kernox is not yet “optimized to the limit.” The evidence proves that the
+post-composition call shape is direct typed-handle dispatch and that the tested
+control-plane paths are bounded on one machine. It does not yet characterize
+allocator profiles, cold-start distributions, high-concurrency contention,
+provider I/O, end-to-end application latency, cache behavior across CPUs, or
+tail latency under load. Those are explicit follow-up measurements before any
+stable 1.0 decision; optimization work should follow a measured bottleneck
+instead of adding speculative machinery to the core.
