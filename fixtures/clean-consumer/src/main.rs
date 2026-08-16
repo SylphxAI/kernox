@@ -1,6 +1,8 @@
 //! A standalone typed application consuming Kernox from outside its workspace.
 
 use std::{
+    collections::BTreeSet,
+    convert::Infallible,
     error::Error,
     sync::{Arc, Barrier},
     thread,
@@ -9,6 +11,9 @@ use std::{
 
 use futures::executor::block_on;
 use kernox::core::PluginSource;
+use kernox::serverless::{
+    InvocationAdmissionError, InvocationError, ServerlessConfig, ServerlessHost,
+};
 use kernox::{
     AppBuilder, BoxFuture, Capability, CapabilityId, CapabilityOffer, CapabilityRequirement,
     InitializationContext, Plugin, PluginDescriptor, PluginError, PluginId, ProvisionSet,
@@ -303,6 +308,89 @@ async fn run_workload() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+async fn run_serverless() -> Result<(), Box<dyn Error>> {
+    let app = compose()?.start().await?;
+    let mut host = ServerlessHost::new(app, ServerlessConfig { max_concurrent_invocations: 1 })?;
+    let application =
+        host.capability_from::<ApplicationCapability>(&PluginId::new(APP_PLUGIN_ID)?)?;
+    let app_scope = host.app_scope_id();
+
+    let held = host.begin_invocation(None)?;
+    if host.begin_invocation(None).err() != Some(InvocationAdmissionError::Capacity) {
+        return Err("serverless consumer did not enforce invocation capacity".into());
+    }
+    drop(held);
+
+    let failed = host
+        .invoke(None, |_context| Box::pin(async { Err::<(), _>("clean-consumer.handler-failed") }))
+        .await;
+    if !matches!(failed, Err(InvocationError::Handler("clean-consumer.handler-failed"))) {
+        return Err("serverless consumer did not surface handler failure".into());
+    }
+    if host.active_invocations() != 0 {
+        return Err("serverless handler failure leaked an invocation".into());
+    }
+
+    let mut scopes = BTreeSet::new();
+    for request in 0_u8..2 {
+        let application = Arc::clone(&application);
+        let result = host
+            .invoke(None, move |context| {
+                Box::pin(async move {
+                    let message = application.greet("Kernox");
+                    Ok::<_, Infallible>((
+                        request,
+                        context.scope().kind(),
+                        context.scope().id(),
+                        context.scope().parent(),
+                        message,
+                    ))
+                })
+            })
+            .await;
+        let (request, kind, scope, parent, message) = match result {
+            Ok(value) => value,
+            Err(InvocationError::Admission(error)) => {
+                return Err(
+                    format!("serverless consumer unexpectedly rejected request: {error}").into()
+                );
+            }
+            Err(InvocationError::Handler(error)) => match error {},
+        };
+        if kind != kernox::runtime::ScopeKind::Invocation {
+            return Err(format!("request {request} used a non-invocation scope").into());
+        }
+        if parent != Some(app_scope) {
+            return Err(format!("request {request} escaped the warm app scope").into());
+        }
+        if message != EXPECTED_MESSAGE {
+            return Err(format!("unexpected serverless result: {message}").into());
+        }
+        scopes.insert(scope);
+    }
+    if scopes.len() != 2 || host.active_invocations() != 0 {
+        return Err("serverless consumer did not close unique invocation scopes".into());
+    }
+
+    drop(application);
+    let shutdown = host.shutdown().await;
+    if !shutdown.is_clean() {
+        return Err(format!(
+            "serverless consumer shutdown had {} failure(s)",
+            shutdown.failures.len()
+        )
+        .into());
+    }
+    if host.begin_invocation(None).err() != Some(InvocationAdmissionError::Closed) {
+        return Err("serverless consumer reopened admission after shutdown".into());
+    }
+    println!(
+        "clean consumer serverless: requests=2 unique_scopes={} handler_failure=observed shutdown=clean",
+        scopes.len()
+    );
+    Ok(())
+}
+
 fn measure_workload(application: &Arc<dyn Application>) -> Result<Vec<u64>, Box<dyn Error>> {
     let samples = thread::scope(|scope| {
         let start_barrier = Arc::new(Barrier::new(WORKLOAD_WORKERS));
@@ -346,9 +434,9 @@ fn percentile(samples: &[u64], percentile: usize) -> u64 {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    if std::env::args().nth(1).as_deref() == Some("--workload") {
-        block_on(run_workload())
-    } else {
-        block_on(run_smoke())
+    match std::env::args().nth(1).as_deref() {
+        Some("--workload") => block_on(run_workload()),
+        Some("--serverless") => block_on(run_serverless()),
+        _ => block_on(run_smoke()),
     }
 }
