@@ -392,7 +392,7 @@ impl RunningApp {
         &self,
         provider: &PluginId,
     ) -> Result<Arc<C::Interface>, AccessError> {
-        if self.terminal.is_some() {
+        if self.terminal.is_some() || self.scope.view().is_closing() {
             return Err(AccessError::ApplicationUnavailable);
         }
         root_capability::<C>(&self.registry, provider)
@@ -546,4 +546,41 @@ fn safe_tag(tag: &'static str) -> &'static str {
         && tag.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
         && tag.as_bytes().last().is_some_and(u8::is_ascii_lowercase);
     if valid { tag } else { "plugin.invalid-error-tag" }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::manual_let_else, clippy::panic, clippy::unwrap_used)]
+
+    use super::*;
+    use crate::Capability;
+
+    trait Export: Send + Sync {}
+    struct ExportCapability;
+
+    impl Capability for ExportCapability {
+        type Interface = dyn Export;
+
+        const ID: &'static str = "dev.kernox.runtime.export";
+        const VERSION: &'static str = "1.0.0";
+    }
+
+    #[test]
+    fn root_capability_access_closes_when_shutdown_begins() {
+        let app = RunningApp {
+            graph: Arc::new(GraphBuilder::new().resolve().expect("empty graph resolves")),
+            plugins: BTreeMap::new(),
+            registry: Registry::default(),
+            observer: default_sink(),
+            scope: Scope::application(),
+            terminal: None,
+        };
+        let provider = PluginId::new("dev.kernox.runtime.export-plugin").expect("valid provider");
+        app.scope.begin_close();
+        let error = match app.capability_from::<ExportCapability>(&provider) {
+            Ok(_) => panic!("root capability access remained open after shutdown began"),
+            Err(error) => error,
+        };
+        assert_eq!(error.tag(), "access.application-unavailable");
+    }
 }

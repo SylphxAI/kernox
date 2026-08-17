@@ -36,5 +36,7 @@ evidence are mature.
 - Graph-level verified-application attribution in `kernox-core`, reused by the
   testkit and `cargo kernox check --verified`.
 - Compile-fail oracle that `InitializationContext` cannot escape as `'static`.
+- Root capability acquisition now fails closed as soon as application shutdown
+  begins, before cleanup hooks finish.
 
 [Unreleased]: https://github.com/SylphxAI/kernox/commits/main
