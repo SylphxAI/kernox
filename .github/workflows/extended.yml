@@ -30,7 +30,7 @@ jobs:
       - name: Fuzz bounded graph input
         env:
           ASAN_OPTIONS: detect_leaks=0
-        run: cargo fuzz run graph_json -- -max_total_time=180
+        run: cargo +nightly-2026-08-14 fuzz run graph_json -- -max_total_time=180
 
   mutation:
     runs-on: sylphx-linux-standard
