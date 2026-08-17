@@ -66,6 +66,12 @@ continued-cleanup path as an expected error. Observation sink unwinds are
 discarded so they cannot abort remaining hooks. This is lifecycle-executor
 supervision, not plugin isolation or process-wide unwind containment.
 
+Root capability acquisition closes at the same admission boundary: once the
+application scope enters `Closing`, `RunningApp::capability_from` fails with
+`access.application-unavailable`, even while cleanup hooks are still running.
+Handles acquired before that boundary remain direct and are not revocable
+without an explicit indirection contract.
+
 Rollback records the primary failure and every cleanup failure without losing
 either. Cleanup continues after an individual cleanup error or hook unwind. A
 repeated shutdown returns the prior terminal report and performs no second
