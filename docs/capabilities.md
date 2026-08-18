@@ -6,6 +6,7 @@ requirements document, a release plan, or an adoption claim.
 
 | Home | Owns |
 | --- | --- |
+| [`docs/vision.md`](vision.md) | Product destination, users, boundaries, and maturity |
 | [`docs/prd.md`](prd.md) | Product promise, KR-* inventory, non-goals, release terminal |
 | [`docs/specs/20260815T185400Z-runtime-contract.md`](specs/20260815T185400Z-runtime-contract.md) | Identifier, resolution, provision, lifecycle, scope, host semantics |
 | [`docs/specs/20260815T185400Z-acceptance.md`](specs/20260815T185400Z-acceptance.md) | Release-claim to oracle matrix |
