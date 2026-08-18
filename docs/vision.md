@@ -1,5 +1,9 @@
 # Kernox product vision
 
+This document is the canonical destination for Kernox. It owns the product's
+users, boundaries, success condition, and maturity; the capability DAG defines
+the architecture required to reach it, and the PRD supplies subordinate detail.
+
 ## Destination
 
 Kernox is an experimental, embeddable Rust engine for composing a Host and a
@@ -51,10 +55,10 @@ calls.
 
 Kernox is currently a pre-1.0 experimental engine on the `0.1.x` package train.
 Local source oracles, a merged change, and a public package are separate facts.
-The first production release is admitted only when every required capability in
-the product requirements has executable evidence, the public API is reviewed
-for 1.x compatibility, the reference applications pass, and the exact package
-artifacts are published and read back from the registry.
+The first production release is admitted only when every node in the product
+capability DAG has its required evidence, the public API is reviewed for 1.x
+compatibility, the reference applications pass, and the exact package artifacts
+are published and read back from the registry.
 
 Product adoption is a separate consumer decision. Kernox earns adoption only
 where an independent comparison shows that it reduces composition and lifecycle
@@ -64,8 +68,9 @@ entropy without a material steady-state regression.
 
 | Document | Authority |
 | --- | --- |
-| [`docs/prd.md`](prd.md) | Product promise, required capabilities, non-goals, and release terminal |
-| [`docs/capabilities.md`](capabilities.md) | Implemented `KNX-*` capability DAG and revision-local oracles |
+| This file | Canonical destination, users, product boundaries, success, and maturity |
+| [`docs/capabilities.md`](capabilities.md) | Stable `KNX-*` product architecture, prerequisites, and admission oracles |
+| [`docs/prd.md`](prd.md) | Detailed KR-* requirements, invariants, non-goals, and release criteria |
 | [`docs/specs/20260815T185400Z-runtime-contract.md`](specs/20260815T185400Z-runtime-contract.md) | Resolution, provisioning, lifecycle, scope, and Host semantics |
 | [`docs/adr/20260815T185400Z-static-capability-graph.md`](adr/20260815T185400Z-static-capability-graph.md) | Static graph architecture decision |
 | [`docs/specs/20260815T185400Z-acceptance.md`](specs/20260815T185400Z-acceptance.md) | Production release claims and falsifiable oracles |
