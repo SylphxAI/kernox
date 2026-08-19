@@ -35,8 +35,7 @@ shutdown:    quiesce -> stop -> dispose in reverse dependency order
 - `cargo kernox` graph validation/rendering, a deterministic testkit, and a
   North Star conformance oracle for verified three-plugin applications; and
 - dual licensing, locked verification, advisory/license/source policy, fuzzing,
-  benchmarks, MSRV checks, approved self-hosted CI, explicit cross-platform
-  portability acceptance, and trusted-publishing automation.
+  benchmarks, MSRV checks, cross-platform CI, and trusted-publishing automation.
 
 Kernox deliberately does not provide HTTP, storage, identity, AI, billing, an
 ORM, a generic event bus, or business policy. Those are plugins or external
@@ -96,7 +95,6 @@ distributions have separate extended lanes.
 - [Runtime semantics](docs/specs/20260815T185400Z-runtime-contract.md)
 - [Production acceptance matrix](docs/specs/20260815T185400Z-acceptance.md)
 - [Standalone cardinality adopter](docs/specs/20260816-standalone-cardinality-adopter.md)
-- [CI runner authority](docs/specs/20260816-ci-runner-authority.md)
 - [Plugin authoring](docs/plugin-authoring.md)
 - [Compatibility](docs/compatibility.md)
 - [Performance evidence](docs/performance.md)
