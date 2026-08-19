@@ -1,11 +1,19 @@
 # Kernox
 
+Kernox is an experimental embeddable Rust engine that composes a host and trusted in-process plugins into one deterministic capability graph.
+
+- Ordinary: `none` — experimental engine; there is no public customer website.
+- Preview: `none` — there is no admitted product-owned preview or dogfood web host.
+- Vision: [`docs/vision.md`](docs/vision.md)
+- Capabilities: [`docs/capabilities.md`](docs/capabilities.md)
+- PRD: [`docs/prd.md`](docs/prd.md)
+- Decisions: [`docs/adr/`](docs/adr/)
+
 **Compose products. Keep domains pure.**
 
-Kernox is a graph-backed application kernel for Rust. A product is a statically
-selected set of plugins. Each plugin declares versioned capabilities it offers
-and requires; Kernox validates the graph, injects typed handles, and owns
-deterministic startup, rollback, and shutdown.
+A product is a statically selected set of plugins. Each plugin declares versioned
+capabilities it offers and requires; Kernox validates the graph, injects typed
+handles, and owns deterministic startup, rollback, and shutdown.
 
 The graph is the control plane, not the request path. After boot, domain code
 calls an ordinary `Arc<dyn Trait>` directly—no graph traversal, serialization,
@@ -88,6 +96,8 @@ distributions have separate extended lanes.
 
 ## Design and operating contract
 
+- [Product vision](docs/vision.md)
+- [Capability architecture](docs/capabilities.md)
 - [Product identity and North Star](PROJECT.md)
 - [Product requirements](docs/prd.md)
 - [Critical path and redesign triggers](docs/critical-path.md)
