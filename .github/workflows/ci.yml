@@ -77,11 +77,15 @@ jobs:
         run: echo 'No published kernox predecessor exists; compatibility starts at this release.'
 
   portability:
-    name: ${{ matrix.os }}
+    name: ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        include:
+          - os: macos-latest
+            name: macOS portability
+          - os: windows-latest
+            name: windows-latest
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
