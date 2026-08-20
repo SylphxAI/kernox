@@ -1,7 +1,7 @@
 # Kernox product vision
 
 This document is the canonical destination for Kernox. It owns the product's
-users, boundaries, success condition, and maturity; the capability DAG defines
+users, boundaries, success condition, and maturity; the identity graph defines
 the architecture required to reach it, and the PRD supplies subordinate detail.
 
 ## Destination
@@ -55,8 +55,8 @@ calls.
 
 Kernox is currently a pre-1.0 experimental engine on the `0.1.x` package train.
 Local source oracles, a merged change, and a public package are separate facts.
-The first production release is admitted only when every node in the product
-capability DAG has its required evidence, the public API is reviewed for 1.x
+The first production release is admitted only when every live identity in the
+product identity graph has its required evidence, the public API is reviewed for 1.x
 compatibility, the reference applications pass, and the exact package artifacts
 are published and read back from the registry.
 
@@ -69,7 +69,7 @@ entropy without a material steady-state regression.
 | Document | Authority |
 | --- | --- |
 | This file | Canonical destination, users, product boundaries, success, and maturity |
-| [`docs/capabilities.md`](capabilities.md) | Stable `KNX-*` product architecture, prerequisites, and admission oracles |
+| [`docs/capabilities.md`](capabilities.md) | Identity graph: `KNX-*` identities, fates, truth-edges, and done-when oracles |
 | [`docs/prd.md`](prd.md) | Detailed KR-* requirements, invariants, non-goals, and release criteria |
 | [`docs/specs/20260815T185400Z-runtime-contract.md`](specs/20260815T185400Z-runtime-contract.md) | Resolution, provisioning, lifecycle, scope, and Host semantics |
 | [`docs/adr/20260815T185400Z-static-capability-graph.md`](adr/20260815T185400Z-static-capability-graph.md) | Static graph architecture decision |
