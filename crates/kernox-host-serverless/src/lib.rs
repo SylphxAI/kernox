@@ -41,6 +41,9 @@ pub enum InvocationAdmissionError {
     /// Configured concurrency capacity is exhausted.
     #[error("serverless invocation capacity is exhausted")]
     Capacity,
+    /// The platform deadline had already elapsed before admission.
+    #[error("serverless invocation deadline has elapsed")]
+    DeadlineExceeded,
 }
 
 impl InvocationAdmissionError {
@@ -50,6 +53,7 @@ impl InvocationAdmissionError {
         match self {
             Self::Closed => "serverless.closed",
             Self::Capacity => "serverless.capacity",
+            Self::DeadlineExceeded => "serverless.deadline-exceeded",
         }
     }
 }
@@ -129,14 +133,18 @@ impl ServerlessHost {
     ///
     /// # Errors
     ///
-    /// Returns [`InvocationAdmissionError`] when shutdown has begun or the
-    /// configured concurrency bound is reached.
+    /// Returns [`InvocationAdmissionError`] when shutdown has begun, the
+    /// deadline has elapsed, or the configured concurrency bound is reached.
     pub fn begin_invocation(
         &self,
         deadline: Option<Instant>,
     ) -> Result<Invocation<'_>, InvocationAdmissionError> {
         if !self.accepting.load(Ordering::Acquire) {
             return Err(InvocationAdmissionError::Closed);
+        }
+
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Err(InvocationAdmissionError::DeadlineExceeded);
         }
 
         self.active
@@ -170,8 +178,9 @@ impl ServerlessHost {
     ///
     /// # Errors
     ///
-    /// Returns [`InvocationError::Admission`] before user code on capacity or
-    /// shutdown failure, and [`InvocationError::Handler`] for user failure.
+    /// Returns [`InvocationError::Admission`] before user code on capacity,
+    /// deadline, or shutdown failure, and [`InvocationError::Handler`] for
+    /// user failure.
     pub async fn invoke<T, E, F>(
         &self,
         deadline: Option<Instant>,

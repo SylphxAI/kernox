@@ -41,7 +41,7 @@ pub enum ComposeError {
     Version(#[from] semver::Error),
     /// The selected capability graph is invalid.
     #[error(transparent)]
-    Resolve(#[from] kernox::core::ResolveError),
+    Resolve(#[from] kernox::runtime::AppResolveError),
 }
 
 /// Example clock port.

@@ -75,7 +75,9 @@ without an explicit indirection contract.
 Rollback records the primary failure and every cleanup failure without losing
 either. Cleanup continues after an individual cleanup error or hook unwind. A
 repeated shutdown returns the prior terminal report and performs no second
-effect.
+effect. Rollback closes application-scope admission before invoking quiesce,
+stop, or dispose hooks and keeps the scope in `Closing` until cleanup
+completes.
 
 ## Scope contract
 
@@ -92,15 +94,28 @@ package that owns those resources.
 - A long-lived Host starts one App Scope, accepts work only after readiness,
   stops new work during quiesce, drains, then shuts down.
 - A serverless Host may reuse one App Scope across warm invocations and creates
-  a fresh Invocation Scope for every call. Correctness never depends on a
-  shutdown callback.
+  a fresh Invocation Scope for every admitted call. An already-elapsed platform
+  deadline is rejected before user code runs; in-flight cancellation remains a
+  provider/runtime concern. Correctness never depends on a shutdown callback.
 - A Tokio Host reports tasks that exceed the cooperative drain budget only
-  after forced abort has destroyed their tracked futures.
+  after forced abort has destroyed their tracked futures. Task labels used in
+  those reports reject control, bidi, and zero-width format characters. The
+  same drain and failure reporting applies when initialization rollback reaches
+  the host's dispose hook before readiness. A quiesced supervisor rejects new
+  task admission before consulting the ambient Tokio runtime. The concrete
+  Tokio task host also requires an active Tokio runtime and timer driver while
+  initializing; it fails with `tokio-task.no-runtime` or
+  `tokio-task.no-timer` before readiness when either part of that execution
+  model is absent. If teardown is attempted outside Tokio while tracked tasks
+  remain, the host aborts admission, reports `tokio-task.no-runtime`, and does
+  not claim that asynchronous task destruction completed.
 - The deterministic testkit records lifecycle order and injects typed failures
   without network or process signals; domain clocks remain ordinary test
   capabilities rather than kernel policy.
-- Host capability negotiation fails before readiness when a Plugin requires an
-  unsupported runtime property.
+- Host capability negotiation fails before readiness when a Plugin's
+  `host_requirements` are not satisfied by the selected Host's versioned
+  `HostCapability` declarations. These properties are negotiation metadata,
+  not injectable application provisions.
 
 ## Observability contract
 

@@ -11,18 +11,21 @@ use std::{
 use futures_util::FutureExt;
 use kernox_core::{CapabilityId, CapabilityOffer, DescriptorError, PluginDescriptor, PluginId};
 use kernox_runtime::{
-    BoxFuture, Capability, InitializationContext, LifecycleContext, Plugin, PluginError,
-    ProvisionSet,
+    BoxFuture, Capability, HostCapability, HostRequirement, InitializationContext,
+    LifecycleContext, Plugin, PluginError, ProvisionSet,
 };
-use semver::Version;
+use semver::{Version, VersionReq};
 use thiserror::Error;
 use tokio::{runtime::Handle, task::AbortHandle, time::timeout};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 const PLUGIN_ID: &str = "dev.kernox.host.tokio";
 const TASK_CAPABILITY_ID: &str = "dev.kernox.host.tokio.tasks";
+/// Host property identifying a Tokio runtime execution model.
+pub const TOKIO_RUNTIME_CAPABILITY_ID: &str = "dev.kernox.host.tokio.runtime";
 const CONTRACT_VERSION: &str = "1.0.0";
 const MAX_TASK_NAME_BYTES: usize = 128;
+const NO_TIMER_ERROR_TAG: &str = "tokio-task.no-timer";
 
 /// Marker for the Tokio supervised-task capability.
 pub struct TokioTasksCapability;
@@ -49,7 +52,7 @@ impl fmt::Display for TaskId {
 pub struct TaskName(String);
 
 impl TaskName {
-    /// Creates a non-empty bounded task name without control characters.
+    /// Creates a non-empty bounded task name without control or format characters.
     ///
     /// # Errors
     ///
@@ -58,7 +61,7 @@ impl TaskName {
         let value = value.into();
         if value.is_empty()
             || value.len() > MAX_TASK_NAME_BYTES
-            || value.chars().any(char::is_control)
+            || value.chars().any(is_unsafe_name_char)
         {
             return Err(SpawnError::InvalidName);
         }
@@ -70,6 +73,19 @@ impl TaskName {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+fn is_unsafe_name_char(character: char) -> bool {
+    character.is_control()
+        || matches!(
+            character,
+            '\u{061c}'
+                | '\u{200b}'..='\u{200f}'
+                | '\u{2028}'..='\u{202e}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{206f}'
+                | '\u{feff}'
+        )
 }
 
 /// Failure to admit a supervised task.
@@ -172,12 +188,21 @@ pub enum TokioTaskPluginError {
     /// A built-in stable identifier is invalid.
     #[error("built-in Tokio host identifier is invalid")]
     Identifier,
+    /// A built-in semantic version is invalid.
+    #[error("built-in Tokio host version is invalid")]
+    Version(#[from] semver::Error),
 }
 
 /// Kernox plugin that publishes one application-scoped Tokio task supervisor.
+///
+/// Initialization requires a Tokio runtime with its timer driver enabled. The
+/// plugin fails before readiness with `tokio-task.no-runtime` or
+/// `tokio-task.no-timer` when the selected execution model cannot provide the
+/// bounded drain contract.
 pub struct TokioTaskPlugin {
     descriptor: PluginDescriptor,
     config: TokioTaskConfig,
+    host_requirements: Vec<HostRequirement>,
     supervisor: Option<Arc<TaskSupervisor>>,
 }
 
@@ -195,11 +220,13 @@ impl TokioTaskPlugin {
         let id = PluginId::new(PLUGIN_ID).map_err(|_| TokioTaskPluginError::Identifier)?;
         let capability =
             CapabilityId::new(TASK_CAPABILITY_ID).map_err(|_| TokioTaskPluginError::Identifier)?;
-        let version =
-            Version::parse(CONTRACT_VERSION).map_err(|_| TokioTaskPluginError::Identifier)?;
+        let version = Version::parse(CONTRACT_VERSION)?;
+        let runtime = tokio_runtime_capability()?;
+        let host_requirements =
+            vec![HostRequirement::new(runtime.id().clone(), VersionReq::parse("^1.0")?)];
         let descriptor = PluginDescriptor::new(id, version.clone())
             .provide(CapabilityOffer::new(capability, version))?;
-        Ok(Self { descriptor, config, supervisor: None })
+        Ok(Self { descriptor, config, host_requirements, supervisor: None })
     }
 }
 
@@ -208,10 +235,27 @@ impl Plugin for TokioTaskPlugin {
         &self.descriptor
     }
 
+    fn host_requirements(&self) -> Vec<HostRequirement> {
+        self.host_requirements.clone()
+    }
+
     fn initialize<'a>(
         &'a mut self,
         _context: InitializationContext<'a>,
     ) -> BoxFuture<'a, Result<ProvisionSet, PluginError>> {
+        if Handle::try_current().is_err() {
+            return Box::pin(async {
+                Err(PluginError::new(
+                    SpawnError::NoRuntime.tag(),
+                    SpawnError::NoRuntime.to_string(),
+                ))
+            });
+        }
+        if !tokio_timer_available() {
+            return Box::pin(async {
+                Err(PluginError::new(NO_TIMER_ERROR_TAG, "Tokio runtime timers are not enabled"))
+            });
+        }
         let supervisor = Arc::new(TaskSupervisor::new(self.config));
         self.supervisor = Some(Arc::clone(&supervisor));
         let interface: Arc<dyn TokioTasks> = supervisor;
@@ -241,35 +285,7 @@ impl Plugin for TokioTaskPlugin {
             let Some(supervisor) = supervisor else {
                 return Ok(());
             };
-            let pending = supervisor.drain().await;
-            if let Some(failure) = supervisor.terminal_failure() {
-                let pending_suffix = if pending.is_empty() {
-                    String::new()
-                } else {
-                    format!("; {} peer task(s) also exceeded drain budget", pending.len())
-                };
-                Err(PluginError::new(
-                    failure.error_tag,
-                    format!(
-                        "{}:{} terminated unexpectedly{pending_suffix}",
-                        failure.id,
-                        failure.name.as_str()
-                    ),
-                ))
-            } else if pending.is_empty() {
-                Ok(())
-            } else {
-                let names = pending
-                    .iter()
-                    .take(16)
-                    .map(|task| format!("{}:{}", task.id, task.name.as_str()))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                Err(PluginError::new(
-                    "tokio-task.drain-timeout",
-                    format!("{} task(s) exceeded drain budget: {names}", pending.len()),
-                ))
-            }
+            drain_failure(&supervisor).await.map_or(Ok(()), Err)
         })
     }
 
@@ -281,10 +297,61 @@ impl Plugin for TokioTaskPlugin {
         Box::pin(async move {
             if let Some(supervisor) = supervisor {
                 supervisor.quiesce();
-                supervisor.abort_all();
+                if let Some(error) = drain_failure(&supervisor).await {
+                    return Err(error);
+                }
             }
             Ok(())
         })
+    }
+}
+
+fn tokio_timer_available() -> bool {
+    std::panic::catch_unwind(|| drop(tokio::time::sleep(Duration::ZERO))).is_ok()
+}
+
+async fn drain_failure(supervisor: &TaskSupervisor) -> Option<PluginError> {
+    if Handle::try_current().is_err() && supervisor.has_tracked_tasks() {
+        supervisor.abort_all();
+        if !supervisor.claim_drain_report() {
+            return None;
+        }
+        return Some(PluginError::new(
+            SpawnError::NoRuntime.tag(),
+            "Tokio runtime is required to drain supervised tasks",
+        ));
+    }
+    let pending = supervisor.drain().await;
+    if !supervisor.claim_drain_report() {
+        return None;
+    }
+    if let Some(failure) = supervisor.terminal_failure() {
+        let pending_suffix = if pending.is_empty() {
+            String::new()
+        } else {
+            format!("; {} peer task(s) also exceeded drain budget", pending.len())
+        };
+        Some(PluginError::new(
+            failure.error_tag,
+            format!(
+                "{}:{} terminated unexpectedly{pending_suffix}",
+                failure.id,
+                failure.name.as_str()
+            ),
+        ))
+    } else if pending.is_empty() {
+        None
+    } else {
+        let names = pending
+            .iter()
+            .take(16)
+            .map(|task| format!("{}:{}", task.id, task.name.as_str()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(PluginError::new(
+            "tokio-task.drain-timeout",
+            format!("{} task(s) exceeded drain budget: {names}", pending.len()),
+        ))
     }
 }
 
@@ -300,6 +367,7 @@ struct State {
     next_id: u64,
     tasks: BTreeMap<TaskId, TaskRecord>,
     terminal_failure: Option<TaskFailure>,
+    drain_reported: bool,
 }
 
 struct SupervisorInner {
@@ -359,6 +427,7 @@ impl TaskSupervisor {
                     next_id: 1,
                     tasks: BTreeMap::new(),
                     terminal_failure: None,
+                    drain_reported: false,
                 }),
             }),
         }
@@ -369,6 +438,10 @@ impl TaskSupervisor {
         state.accepting = false;
         self.inner.tracker.close();
         self.inner.cancellation.cancel();
+    }
+
+    fn has_tracked_tasks(&self) -> bool {
+        !self.inner.tracker.is_empty()
     }
 
     async fn drain(&self) -> Vec<PendingTask> {
@@ -398,15 +471,25 @@ impl TaskSupervisor {
             handle.abort();
         }
     }
+
+    fn claim_drain_report(&self) -> bool {
+        let mut state = self.inner.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.drain_reported {
+            false
+        } else {
+            state.drain_reported = true;
+            true
+        }
+    }
 }
 
 impl TokioTasks for TaskSupervisor {
     fn spawn(&self, name: TaskName, future: BoxFuture<'static, ()>) -> Result<TaskId, SpawnError> {
-        let handle = Handle::try_current().map_err(|_| SpawnError::NoRuntime)?;
         let mut state = self.inner.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !state.accepting {
             return Err(SpawnError::Closed);
         }
+        let handle = Handle::try_current().map_err(|_| SpawnError::NoRuntime)?;
         if state.tasks.len() >= self.inner.config.max_tasks {
             return Err(SpawnError::Capacity);
         }
@@ -462,4 +545,21 @@ impl TokioTasks for TaskSupervisor {
 /// constant is invalid.
 pub fn tokio_task_plugin_id() -> Result<PluginId, kernox_core::IdentifierError> {
     PluginId::new(PLUGIN_ID)
+}
+
+/// Returns the host property a Tokio runtime supplies to compatible plugins.
+///
+/// The selected application Host must pass this capability to
+/// [`kernox_runtime::AppBuilder::host_capability`] before resolving a graph
+/// containing [`TokioTaskPlugin`].
+///
+/// # Errors
+///
+/// Returns a construction error only if this crate's built-in contract is
+/// invalid.
+pub fn tokio_runtime_capability() -> Result<HostCapability, TokioTaskPluginError> {
+    let id = CapabilityId::new(TOKIO_RUNTIME_CAPABILITY_ID)
+        .map_err(|_| TokioTaskPluginError::Identifier)?;
+    let version = Version::parse(CONTRACT_VERSION)?;
+    Ok(HostCapability::new(id, version))
 }

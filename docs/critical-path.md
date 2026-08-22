@@ -65,6 +65,9 @@ Exit evidence:
 - The publishable package set has one version, complete metadata, and a
   topological dependency order; `cargo package --locked --workspace` produces
   the full dry-run artifact set from the locked source.
+- Every workflow job runs on one approved Sylphx Platform self-hosted profile;
+  the macOS portability lane is retained, while Windows portability remains an
+  explicit Platform-owned acceptance residual until an approved profile exists.
 - API semantic-version checks pass against the admitted predecessor where one
   exists.
 - Documentation examples compile from clean consumers.
