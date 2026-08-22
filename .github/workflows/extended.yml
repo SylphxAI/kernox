@@ -24,7 +24,7 @@ jobs:
         with:
           toolchain: nightly-2026-08-14
       - name: Install cargo-fuzz
-        uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780 # v2.86.1
+        uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
         with:
           tool: cargo-fuzz@0.13.2
       - name: Fuzz bounded graph input
@@ -43,7 +43,7 @@ jobs:
         with:
           toolchain: 1.97.1
       - name: Install cargo-mutants
-        uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780 # v2.86.1
+        uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
         with:
           tool: cargo-mutants@27.1.0
       - name: Mutation-test kernel contracts
