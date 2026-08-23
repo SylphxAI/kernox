@@ -2,7 +2,7 @@ use std::{future::Future, pin::Pin};
 
 use kernox_core::PluginDescriptor;
 
-use crate::{InitializationContext, PluginError, ProvisionSet, ScopeView};
+use crate::{HostRequirement, InitializationContext, PluginError, ProvisionSet, ScopeView};
 
 /// Boxed future used by the object-safe plugin lifecycle contract.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -29,6 +29,15 @@ impl<'a> LifecycleContext<'a> {
 pub trait Plugin: Send + Sync + 'static {
     /// Returns the immutable composition contract for this instance.
     fn descriptor(&self) -> &PluginDescriptor;
+
+    /// Returns static requirements on the selected Host runtime.
+    ///
+    /// Kernox evaluates this once beside [`Plugin::descriptor`] during
+    /// composition. Host requirements are negotiation metadata, not graph
+    /// provisions and are never consulted by normal application calls.
+    fn host_requirements(&self) -> Vec<HostRequirement> {
+        Vec::new()
+    }
 
     /// Builds declared provisions using only declared, already-ready dependencies.
     ///

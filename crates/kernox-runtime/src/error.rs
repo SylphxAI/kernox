@@ -1,10 +1,32 @@
 use std::fmt;
 
-use kernox_core::{CapabilityId, IdentifierError, PluginId, RequirementCardinality};
+use kernox_core::{CapabilityId, IdentifierError, PluginId, RequirementCardinality, ResolveError};
 use semver::Version;
 use thiserror::Error;
 
 use crate::LifecyclePhase;
+
+/// Failure while resolving an application graph or its selected Host.
+#[derive(Clone, Debug, Error, PartialEq)]
+pub enum AppResolveError {
+    /// The plugin graph was invalid.
+    #[error(transparent)]
+    Graph(#[from] ResolveError),
+    /// A plugin's host-runtime contract was not satisfied.
+    #[error(transparent)]
+    Host(#[from] crate::HostResolutionError),
+}
+
+impl AppResolveError {
+    /// Returns the stable machine-readable diagnostic tag.
+    #[must_use]
+    pub const fn tag(&self) -> &'static str {
+        match self {
+            Self::Graph(error) => error.tag(),
+            Self::Host(error) => error.tag(),
+        }
+    }
+}
 
 /// An invalid compile-time capability contract.
 #[derive(Clone, Debug, Error, PartialEq)]

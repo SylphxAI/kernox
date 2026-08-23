@@ -33,14 +33,17 @@ change. Display names and crate names are not identities.
 
 Construct one immutable `PluginDescriptor` with offers, requirements,
 conflicts, version, and source attribution. A single-provider ambiguity fails
-unless the product supplies an explicit `Binding`. Host needs
-are ordinary capabilities: a background worker that needs supervised Tokio
-tasks declares `dev.kernox.host.tokio.tasks`; without the host plugin, graph
-resolution fails before readiness.
+unless the product supplies an explicit `Binding`. Runtime properties are a
+separate Host negotiation contract: a plugin overrides `host_requirements`, and
+the selected Host supplies matching `HostCapability` values to
+`AppBuilder::host_capability`. The check fails before readiness; these values
+are not application provisions and never add work to normal calls. The Tokio
+host's `tokio_runtime_capability()` is the concrete example.
 
-Kernox snapshots `descriptor()` once before resolution. Do not mutate or derive
-it from live configuration; configuration values belong in the plugin instance
-behind that stable contract.
+Kernox snapshots `descriptor()` and `host_requirements()` once before
+resolution. Do not mutate or derive either contract from live configuration;
+configuration values belong in the plugin instance behind that stable
+contract.
 
 ## 3. Initialize transactionally
 

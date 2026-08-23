@@ -8,6 +8,7 @@ use std::sync::{
 use kernox::core::PluginSource;
 use kernox::tokio::{
     SpawnError, TaskName, TokioTaskConfig, TokioTaskPlugin, TokioTasks, TokioTasksCapability,
+    tokio_runtime_capability,
 };
 use kernox::{
     AppBuilder, BoxFuture, Capability, CapabilityId, CapabilityOffer, CapabilityRequirement,
@@ -49,9 +50,9 @@ pub enum ComposeError {
     /// A built-in semantic version is invalid.
     #[error(transparent)]
     Version(#[from] semver::Error),
-    /// The selected graph is invalid.
+    /// The selected graph or Host contract is invalid.
     #[error(transparent)]
-    Resolve(#[from] kernox::core::ResolveError),
+    Resolve(#[from] kernox::runtime::AppResolveError),
     /// The official Tokio host plugin could not be constructed.
     #[error(transparent)]
     TokioHost(#[from] kernox::tokio::TokioTaskPluginError),
@@ -151,6 +152,7 @@ impl Plugin for HeartbeatWorker {
 /// contract cannot be constructed.
 pub fn compose() -> Result<ResolvedApp, ComposeError> {
     Ok(AppBuilder::new()
+        .host_capability(tokio_runtime_capability()?)
         .plugin(TokioTaskPlugin::new(TokioTaskConfig {
             max_tasks: 8,
             drain_timeout: std::time::Duration::from_secs(1),

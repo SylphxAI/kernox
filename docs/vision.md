@@ -1,77 +1,31 @@
-# Kernox product vision
+# Kernox Vision
 
-This document is the canonical destination for Kernox. It owns the product's
-users, boundaries, success condition, and maturity; the identity graph defines
-the architecture required to reach it, and the PRD supplies subordinate detail.
+**Status:** Canonical product destination
+**Identity graph:** [`capabilities.md`](capabilities.md)
+**ADR:** [`adr/20260815T185400Z-static-capability-graph.md`](adr/20260815T185400Z-static-capability-graph.md)
+
+This document owns the long-term product destination. It does not claim the destination is landed or live.
 
 ## Destination
 
-Kernox is an experimental, embeddable Rust engine for composing a Host and a
-set of trusted in-process Plugins into one deterministic capability graph. It
-exists to make capability selection, provisioning, and lifecycle ownership
-explicit before an application serves work while leaving product, domain, and
-service authority with the owning application.
+Kernox is a graph-backed application kernel for Rust. A product is a statically selected set of plugins. Each plugin declares versioned capabilities it offers and requires; Kernox validates the graph, injects typed handles, and owns deterministic startup, rollback, and shutdown.
 
-At the destination, a product author can select plugins, bind intentional
-provider choices, and receive a typed failure for an invalid composition before
-any plugin hook runs. A valid composition provisions declared dependencies
-atomically, starts and tears down in deterministic dependency order, and gives
-application code direct typed handles. The graph is control-plane state; it is
-not traversed on the normal call path.
+The graph is the control plane, not the request path. After boot, domain code calls an ordinary `Arc<dyn Trait>` directly — no graph traversal, serialization, event bus, or service-locator lookup per call. The absolute point-estimate delta against direct composition is 0.14% on the recorded baseline, with overlapping confidence intervals. Hosts (Tokio long-lived, warm serverless, CLI, deterministic test host) own the outer execution model.
 
-The engine remains host-, runtime-, provider-, and domain-neutral. Hosts own the
-outer execution model, Plugins own their resources and admission behavior, and
-applications keep their business policy outside Kernox.
+## Users and their jobs
 
-## Users
+- **Rust product engineers** composing modular monoliths, services, workers, CLIs, serverless functions, or game/application hosts.
+- **Library authors** publishing reusable domain, adapter, or host plugins.
+- **Platform engineers** exposing existing services through replaceable adapters without moving service authority into Kernox.
 
-- Rust product engineers composing modular monoliths, services, workers, CLIs,
-  serverless functions, games, or other application hosts.
-- Library authors publishing reusable domain, adapter, or host plugins with
-  explicit typed capability contracts.
-- Platform engineers exposing existing services through replaceable adapters
-  without transferring service authority into Kernox.
+## Not doing
 
-## Product boundaries
+- HTTP, storage, identity, AI, billing, ORM, generic event bus, or business policy.
+- Out-of-process or WebAssembly extension that weakens the native static path before implementation.
+- A second product tree or a runtime service-locator per call.
 
-Kernox is a plugin and capability composition engine. It is not:
+## Product oracle
 
-- a service locator, ambient global resolver, event bus, broker, ORM, service
-  mesh, or deployment control plane;
-- a security sandbox or process-isolation boundary for native Plugins, which
-  are trusted code sharing the Host process;
-- the owner of HTTP, identity, storage, billing, AI, queue, workflow, or other
-  business capabilities;
-- a reason to turn every function, entity, adapter, or crate into a Plugin; or
-- a promise that different domain semantics become reusable merely because
-  they share a packaging shape.
+The destination is true only when a three-plugin application can compose via descriptors, validate the capability DAG deterministically (stable startup/teardown order independent of insertion), publish typed handles atomically, roll back in reverse order on failure, supervise Tokio tasks with cancellation/drain, and prove locked builds, benchmarks, and provenance in the current source contract.
 
-Arbitrary native dynamic-library loading and runtime-isolated Plugin formats
-are outside the native path. Any future out-of-process or WebAssembly extension
-must preserve the same composition semantics without weakening direct native
-calls.
-
-## Success and maturity
-
-Kernox is currently a pre-1.0 experimental engine on the `0.1.x` package train.
-Local source oracles, a merged change, and a public package are separate facts.
-The first production release is admitted only when every live identity in the
-product identity graph has its required evidence, the public API is reviewed for 1.x
-compatibility, the reference applications pass, and the exact package artifacts
-are published and read back from the registry.
-
-Product adoption is a separate consumer decision. Kernox earns adoption only
-where an independent comparison shows that it reduces composition and lifecycle
-entropy without a material steady-state regression.
-
-## Canonical references
-
-| Document | Authority |
-| --- | --- |
-| This file | Canonical destination, users, product boundaries, success, and maturity |
-| [`docs/capabilities.md`](capabilities.md) | Identity graph: `KNX-*` identities, fates, truth-edges, and done-when oracles |
-| [`docs/prd.md`](prd.md) | Detailed KR-* requirements, invariants, non-goals, and release criteria |
-| [`docs/specs/20260815T185400Z-runtime-contract.md`](specs/20260815T185400Z-runtime-contract.md) | Resolution, provisioning, lifecycle, scope, and Host semantics |
-| [`docs/adr/20260815T185400Z-static-capability-graph.md`](adr/20260815T185400Z-static-capability-graph.md) | Static graph architecture decision |
-| [`docs/specs/20260815T185400Z-acceptance.md`](specs/20260815T185400Z-acceptance.md) | Production release claims and falsifiable oracles |
-| [`docs/critical-path.md`](critical-path.md) | Risk sequence, redesign triggers, and adoption gate |
+A crate publish or `cargo test` green alone is not the whole oracle; `cargo kernox check --verified` on the reference fixtures must hold.

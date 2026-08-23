@@ -164,7 +164,7 @@ pub enum ComposeError {
     Version(#[from] semver::Error),
     /// The selected graph is invalid.
     #[error(transparent)]
-    Resolve(#[from] kernox::core::ResolveError),
+    Resolve(#[from] kernox::runtime::AppResolveError),
 }
 
 struct MemoryInventory {
