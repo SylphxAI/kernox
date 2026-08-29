@@ -36,6 +36,7 @@ machines and remain source/test evidence only; they do not prove compliance
 with this runner authority. A compliant CI claim requires the new workflows to
 execute on the static Sylphx labels above.
 
-The `xtask verify` entrypoint checks workflow runner declarations before the
-product verification path, so a future hosted or dynamic selector fails the
-repository commit build locally and in CI.
+The `xtask verify` entrypoint parses each workflow job's `runs-on` value before
+the product verification path, so a future hosted or dynamic selector fails the
+repository commit build locally and in CI. A comment that mentions a hosted
+label is not a runner assignment.

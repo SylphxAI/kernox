@@ -886,6 +886,19 @@ mod tests {
         assert_eq!(builder.resolve().unwrap_err().tag(), expected);
     }
 
+    #[cfg(feature = "serde")]
+    fn valid_empty_report() -> &'static str {
+        r#"{
+            "schema_version": 1,
+            "plugins": [],
+            "requirements": [],
+            "edges": [],
+            "diagnostics": [],
+            "startup_order": [],
+            "teardown_order": []
+        }"#
+    }
+
     #[test]
     fn resolves_dependency_order_and_reverse_teardown() {
         let clock = capability("dev.kernox.clock");
@@ -1163,8 +1176,10 @@ mod tests {
             "startup_order": [],
             "teardown_order": []
         }"#;
-        let error = serde_json::from_str::<GraphReport>(unsupported).unwrap_err();
-        assert!(error.to_string().contains("unsupported"));
+        assert!(serde_json::from_str::<GraphReport>(unsupported).is_err());
+        let accepted: GraphReport = serde_json::from_str(valid_empty_report()).unwrap();
+        assert_eq!(accepted.schema_version, GRAPH_REPORT_SCHEMA_VERSION);
+        assert!(accepted.plugins.is_empty());
 
         let unknown_field = r#"{
             "schema_version": 1,
@@ -1176,8 +1191,8 @@ mod tests {
             "teardown_order": [],
             "surprise": true
         }"#;
-        let error = serde_json::from_str::<GraphReport>(unknown_field).unwrap_err();
-        assert!(error.to_string().contains("unknown field"));
+        assert!(serde_json::from_str::<GraphReport>(unknown_field).is_err());
+        assert_eq!(serde_json::from_str::<GraphReport>(valid_empty_report()).unwrap(), accepted);
     }
 
     #[test]
@@ -1356,8 +1371,23 @@ mod tests {
             "surprise": true
         }"#;
 
-        let error = serde_json::from_str::<CompositionSpec>(input).unwrap_err();
-        assert!(error.to_string().contains("unknown field"));
+        assert!(serde_json::from_str::<CompositionSpec>(input).is_err());
+        let accepted: CompositionSpec = serde_json::from_str(
+            r#"{
+            "schema_version": 1,
+            "limits": {
+                "max_plugins": 1,
+                "max_capabilities_per_plugin": 1,
+                "max_edges": 1
+            },
+            "plugins": [],
+            "bindings": []
+        }"#,
+        )
+        .unwrap();
+        assert_eq!(accepted.schema_version, COMPOSITION_SCHEMA_VERSION);
+        assert!(accepted.plugins.is_empty());
+        assert_eq!(accepted.limits.max_plugins, 1);
     }
 
     proptest! {

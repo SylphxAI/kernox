@@ -13,7 +13,8 @@ use kernox_core::{
 };
 use kernox_runtime::{
     AppBuilder, BoxFuture, Capability, InitializationContext, LifecycleContext,
-    LifecycleObservation, ObservationSink, Plugin, PluginError, ProvisionSet, ScopeState,
+    LifecycleObservation, ObservationSink, Plugin, PluginError, ProvisionSet, ScopeError,
+    ScopeState,
 };
 use semver::{Version, VersionReq};
 
@@ -296,6 +297,7 @@ fn boots_with_direct_typed_handle_and_shuts_down_in_reverse_order_once() {
         let second = app.shutdown().await;
         assert!(first.is_clean());
         assert_eq!(first, second);
+        assert_eq!(clock.tick(), 42);
         assert_eq!(
             app.capability_from::<ClockCapability>(&plugin_id("dev.example.clock-plugin"))
                 .err()
@@ -303,6 +305,7 @@ fn boots_with_direct_typed_handle_and_shuts_down_in_reverse_order_once() {
                 .tag(),
             "access.application-unavailable"
         );
+        assert_eq!(app.invocation_scope().err(), Some(ScopeError));
         assert_eq!(
             snapshot(&events),
             [
@@ -787,6 +790,24 @@ fn observation_sink_unwind_does_not_abort_lifecycle() {
             .expect("a panicking sink must not abort startup");
 
         assert!(app.shutdown().await.is_clean());
+    });
+}
+
+#[test]
+fn closed_invocation_scopes_do_not_block_later_admission() {
+    block_on(async {
+        let mut app = AppBuilder::new().resolve().unwrap().start().await.unwrap();
+        let app_scope = app.scope().id();
+        for _ in 0..10_000 {
+            app.invocation_scope().unwrap().close();
+        }
+
+        let late = app.invocation_scope().unwrap();
+        assert_eq!(late.view().parent(), Some(app_scope));
+        assert_eq!(late.view().state(), ScopeState::Open);
+        late.close();
+        assert!(app.shutdown().await.is_clean());
+        assert_eq!(app.invocation_scope().err(), Some(ScopeError));
     });
 }
 

@@ -179,31 +179,3 @@ const fn decode_state(value: u8) -> ScopeState {
         _ => ScopeState::Closed,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn closed_children_are_removed_from_a_long_lived_parent() -> Result<(), ScopeError> {
-        let application = Scope::application();
-        for _ in 0..10_000 {
-            let invocation = application.child(ScopeKind::Invocation)?;
-            invocation.begin_close();
-            invocation.finish_close();
-        }
-
-        let children =
-            application.inner.children.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        assert!(children.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn child_is_rejected_after_parent_close_begins() {
-        let application = Scope::application();
-        application.begin_close();
-
-        assert!(matches!(application.child(ScopeKind::Invocation), Err(ScopeError)));
-    }
-}

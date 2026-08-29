@@ -16,7 +16,6 @@ const RELEASE_ORDER: &[&str] = &[
     "kernox",
     "cargo-kernox",
 ];
-const FORBIDDEN_HOSTED_LABELS: [&str; 3] = ["ubuntu-latest", "macos-latest", "windows-latest"];
 const APPROVED_RUNNERS: [&str; 2] =
     ["sylphx-linux-standard", "[self-hosted, sylphx, macos, standard]"];
 
@@ -318,35 +317,60 @@ fn enforce_workflow_runner_boundary() -> Result<(), String> {
     for path in workflow_paths {
         let source = fs::read_to_string(&path)
             .map_err(|error| format!("could not read {}: {error}", path.display()))?;
-        for label in FORBIDDEN_HOSTED_LABELS {
-            if source.contains(label) {
+        let profiles = runner_profiles_from_workflow(&source)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        if profiles.is_empty() {
+            return Err(format!("{} declares no runner profile", path.display()));
+        }
+        for (job, profile) in profiles {
+            if !APPROVED_RUNNERS.contains(&profile.as_str()) {
                 return Err(format!(
-                    "{} contains forbidden GitHub-hosted runner label {label}",
+                    "{} job {job} declares unsupported runs-on {profile:?}; use one static approved Sylphx profile",
                     path.display()
                 ));
             }
         }
-
-        let mut declarations = 0;
-        for (index, line) in source.lines().enumerate() {
-            let Some(value) = line.trim().strip_prefix("runs-on:") else {
-                continue;
-            };
-            declarations += 1;
-            let value = value.trim();
-            if !APPROVED_RUNNERS.contains(&value) {
-                return Err(format!(
-                    "{}:{} declares unsupported runs-on {value:?}; use one static approved Sylphx profile",
-                    path.display(),
-                    index + 1
-                ));
-            }
-        }
-        if declarations == 0 {
-            return Err(format!("{} declares no runner profile", path.display()));
-        }
     }
     Ok(())
+}
+
+fn runner_profiles_from_workflow(source: &str) -> Result<Vec<(String, String)>, String> {
+    let parsed: serde_yaml::Value =
+        serde_yaml::from_str(source).map_err(|error| format!("invalid workflow YAML: {error}"))?;
+    let jobs = parsed
+        .get("jobs")
+        .and_then(serde_yaml::Value::as_mapping)
+        .ok_or_else(|| "workflow declares no jobs mapping".to_owned())?;
+    let mut profiles = Vec::new();
+    for (name, job) in jobs {
+        let name = name.as_str().unwrap_or("").to_owned();
+        let Some(job) = job.as_mapping() else {
+            return Err(format!("job {name} is not a mapping"));
+        };
+        let Some(runs_on) = job.get(serde_yaml::Value::from("runs-on")) else {
+            return Err(format!("job {name} declares no runner profile"));
+        };
+        profiles.push((name, format_runs_on(runs_on)?));
+    }
+    profiles.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(profiles)
+}
+
+fn format_runs_on(value: &serde_yaml::Value) -> Result<String, String> {
+    match value {
+        serde_yaml::Value::String(label) => Ok(label.clone()),
+        serde_yaml::Value::Sequence(labels) => {
+            let mut formatted = Vec::with_capacity(labels.len());
+            for label in labels {
+                let Some(label) = label.as_str() else {
+                    return Err("runs-on sequence contains a non-string label".to_owned());
+                };
+                formatted.push(label);
+            }
+            Ok(format!("[{}]", formatted.join(", ")))
+        }
+        _ => Err(format!("unsupported runs-on value {value:?}")),
+    }
 }
 
 fn run(
@@ -413,4 +437,54 @@ fn enforce_core_dependency_boundary() -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used)]
+
+    use super::{APPROVED_RUNNERS, format_runs_on, runner_profiles_from_workflow};
+
+    #[test]
+    fn workflow_runner_profiles_are_the_job_runs_on_values() {
+        let source = r"
+name: commit
+# ubuntu-latest in a comment is not a runner assignment
+jobs:
+  verify:
+    runs-on: sylphx-linux-standard
+  macos:
+    runs-on: [self-hosted, sylphx, macos, standard]
+";
+        let profiles = runner_profiles_from_workflow(source).expect("valid workflow");
+        assert_eq!(
+            profiles,
+            [
+                ("macos".to_owned(), "[self-hosted, sylphx, macos, standard]".to_owned()),
+                ("verify".to_owned(), "sylphx-linux-standard".to_owned()),
+            ]
+        );
+        assert!(profiles.iter().all(|(_, profile)| APPROVED_RUNNERS.contains(&profile.as_str())));
+    }
+
+    #[test]
+    fn hosted_and_dynamic_runner_profiles_are_not_approved() {
+        let hosted =
+            runner_profiles_from_workflow("jobs:\n  verify:\n    runs-on: ubuntu-latest\n")
+                .expect("hosted label still parses as a profile");
+        assert_eq!(hosted, [("verify".to_owned(), "ubuntu-latest".to_owned())]);
+        assert!(!APPROVED_RUNNERS.contains(&hosted[0].1.as_str()));
+
+        let dynamic = format_runs_on(&serde_yaml::Value::from("${{ matrix.os }}"))
+            .expect("expressions remain exact labels");
+        assert!(!APPROVED_RUNNERS.contains(&dynamic.as_str()));
+    }
+
+    #[test]
+    fn missing_jobs_or_runs_on_fail_closed() {
+        assert!(runner_profiles_from_workflow("name: empty\n").is_err());
+        assert!(
+            runner_profiles_from_workflow("jobs:\n  verify:\n    timeout-minutes: 5\n").is_err()
+        );
+    }
 }
