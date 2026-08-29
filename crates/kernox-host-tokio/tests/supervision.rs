@@ -166,7 +166,7 @@ async fn stubborn_task_is_named_reported_and_force_aborted() {
         app.capability_from::<TokioTasksCapability>(&tokio_task_plugin_id().unwrap()).unwrap();
     let dropped = Arc::new(AtomicBool::new(false));
     let drop_probe = Arc::clone(&dropped);
-    tasks
+    let task_id = tasks
         .spawn(
             TaskName::new("stubborn-worker").unwrap(),
             Box::pin(async move {
@@ -183,8 +183,12 @@ async fn stubborn_task_is_named_reported_and_force_aborted() {
     let report = app.shutdown().await;
 
     assert_eq!(report.failures.len(), 1);
+    assert_eq!(report.failures[0].plugin, tokio_task_plugin_id().unwrap());
     assert_eq!(report.failures[0].error_tag, "tokio-task.drain-timeout");
-    assert!(report.failures[0].message.contains("stubborn-worker"));
+    assert_eq!(
+        report.failures[0].message,
+        format!("1 task(s) exceeded drain budget: {task_id}:stubborn-worker")
+    );
     assert!(dropped.load(Ordering::Acquire));
     assert!(tasks.pending_tasks().is_empty());
 }

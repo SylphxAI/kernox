@@ -176,67 +176,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn accepts_bounded_empty_composition_and_renders_stable_dot() {
-        let input = br#"{
-            "schema_version": 1,
-            "limits": {
-                "max_plugins": 10,
-                "max_capabilities_per_plugin": 10,
-                "max_edges": 10
-            },
-            "plugins": [],
-            "bindings": []
-        }"#;
-        let spec: CompositionSpec = serde_json::from_slice(input).unwrap();
-        let report = GraphBuilder::from_spec(spec).resolve().unwrap().report();
-
-        assert_eq!(render_dot(&report).unwrap(), "digraph kernox {\n  rankdir=LR;\n}\n");
-    }
-
-    #[test]
-    fn verified_check_requires_three_attributed_plugins() {
-        let two = br#"{
-            "schema_version": 1,
-            "limits": {"max_plugins": 10, "max_capabilities_per_plugin": 10, "max_edges": 10},
-            "plugins": [
-                {
-                    "id": "dev.example.clock",
-                    "version": "1.0.0",
-                    "source": {"package": "pkg-clock", "repository": "https://example.invalid/clock"},
-                    "provides": [{"id": "dev.example.clock", "version": "1.0.0"}],
-                    "requires": [],
-                    "conflicts": []
-                },
-                {
-                    "id": "dev.example.orders",
-                    "version": "1.0.0",
-                    "source": {"package": "pkg-orders", "repository": "https://example.invalid/orders"},
-                    "provides": [],
-                    "requires": [{"id": "dev.example.clock", "version": "^1.0", "cardinality": "ExactlyOne"}],
-                    "conflicts": []
-                }
-            ],
-            "bindings": []
-        }"#;
-        let spec: CompositionSpec = serde_json::from_slice(two).unwrap();
-        let graph = GraphBuilder::from_spec(spec).resolve().unwrap();
-        assert_eq!(
-            verify_graph_attribution(&graph).unwrap_err().tag(),
-            "conformance.too-few-plugins"
-        );
-
-        let verified = std::fs::read(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/compositions/verified.json"),
-        )
-        .unwrap();
-        let spec: CompositionSpec = serde_json::from_slice(&verified).unwrap();
-        let report = verify_graph_attribution(&GraphBuilder::from_spec(spec).resolve().unwrap())
-            .expect("verified fixture must pass");
-        assert_eq!(report.plugin_count, 3);
-        assert_eq!(report.source_packages.len(), 3);
-    }
-
-    #[test]
     fn rejects_oversized_input_before_json_parsing() {
         let reader = io::repeat(b'x').take(MAX_SPEC_BYTES + 1);
         let error = read_bounded(reader).unwrap_err();

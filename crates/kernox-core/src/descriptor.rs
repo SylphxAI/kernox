@@ -406,11 +406,58 @@ impl Binding {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use semver::Version;
+
+    use super::*;
+    use crate::{CapabilityId, PluginId};
+
+    #[test]
+    fn duplicate_offer_fails_with_stable_tag() {
+        let capability = CapabilityId::new("dev.example.clock").unwrap();
+        let error = PluginDescriptor::new(
+            PluginId::new("dev.example.plugin").unwrap(),
+            Version::new(1, 0, 0),
+        )
+        .provide(CapabilityOffer::new(capability.clone(), Version::new(1, 0, 0)))
+        .unwrap()
+        .provide(CapabilityOffer::new(capability, Version::new(1, 1, 0)))
+        .unwrap_err();
+
+        assert_eq!(error.tag(), "descriptor.duplicate-offer");
+    }
+
+    #[test]
+    fn invalid_source_fails_with_stable_tag() {
+        assert_eq!(
+            PluginSource::new("bad\npackage", None).unwrap_err().tag(),
+            "descriptor.invalid-source"
+        );
+        assert_eq!(PluginSource::new("  ", None).unwrap_err().tag(), "descriptor.invalid-source");
+        assert_eq!(
+            PluginSource::new("valid", Some(" https://example.com".to_owned())).unwrap_err().tag(),
+            "descriptor.invalid-source"
+        );
+    }
+}
+
 #[cfg(all(test, feature = "serde"))]
 mod serde_tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+
+    const VALID_DESCRIPTOR: &str = r#"{
+        "id": "dev.example.plugin",
+        "version": "1.0.0",
+        "source": null,
+        "provides": [{"id": "dev.example.clock", "version": "1.0.0"}],
+        "requires": [],
+        "conflicts": []
+    }"#;
 
     #[test]
     fn descriptor_deserialization_rejects_duplicate_offers() {
@@ -426,18 +473,22 @@ mod serde_tests {
             "conflicts": []
         }"#;
 
-        let error = serde_json::from_str::<PluginDescriptor>(input).unwrap_err();
-        assert!(error.to_string().contains("more than once"));
+        assert!(serde_json::from_str::<PluginDescriptor>(input).is_err());
+        let accepted: PluginDescriptor = serde_json::from_str(VALID_DESCRIPTOR).unwrap();
+        assert_eq!(accepted.id().as_str(), "dev.example.plugin");
+        assert_eq!(accepted.provides().len(), 1);
     }
 
     #[test]
     fn source_deserialization_reapplies_validation() {
-        let input = r#"{"package":"bad\npackage","repository":null}"#;
-
-        let error = serde_json::from_str::<PluginSource>(input).unwrap_err();
-        assert!(error.to_string().contains("control characters"));
-        assert!(PluginSource::new("  ", None).is_err());
-        assert!(PluginSource::new("valid", Some(" https://example.com".to_owned())).is_err());
+        assert!(
+            serde_json::from_str::<PluginSource>(r#"{"package":"bad\npackage","repository":null}"#)
+                .is_err()
+        );
+        let source: PluginSource =
+            serde_json::from_str(r#"{"package":"pkg","repository":null}"#).unwrap();
+        assert_eq!(source.package(), "pkg");
+        assert_eq!(source.repository(), None);
     }
 
     #[test]
@@ -450,7 +501,8 @@ mod serde_tests {
             ]
         }"#;
 
-        let error = serde_json::from_str::<PluginDescriptor>(input).unwrap_err();
-        assert!(error.to_string().contains("unknown field"));
+        assert!(serde_json::from_str::<PluginDescriptor>(input).is_err());
+        let accepted: PluginDescriptor = serde_json::from_str(VALID_DESCRIPTOR).unwrap();
+        assert_eq!(accepted.provides().len(), 1);
     }
 }

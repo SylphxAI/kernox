@@ -184,7 +184,10 @@ mod tests {
     #[cfg(feature = "serde")]
     #[test]
     fn deserialization_revalidates_identifiers() {
+        assert_eq!(PluginId::new("Invalid").unwrap_err().tag(), "identifier.invalid-segment-start");
         let parsed: Result<PluginId, _> = serde_json::from_str("\"Invalid\"");
         assert!(parsed.is_err());
+        let accepted: PluginId = serde_json::from_str("\"dev.kernox.host-tokio\"").unwrap();
+        assert_eq!(accepted.as_str(), "dev.kernox.host-tokio");
     }
 }
