@@ -22,3 +22,37 @@ ID | Identity | Fate | Depends on | Done when
 | KR-TOOLING | Inspection + conformance tooling | live | KR-CAP | Versioned graph description export, `cargo-kernox` validation/rendering, verified-application source attribution, reference fixtures, and `kernox-testkit` conformance hold. |
 
 Edges are hard prerequisites. A green `cargo test` or version bump does not close a node whose fixture or example fails.
+
+## Release boundary (GOV-017)
+
+Declared per [ADR-030](https://github.com/SylphxAI/owner/blob/main/decisions/ADR-030-RELEASE-CONTROL-PLANE.md)
+and [GOV-017](https://github.com/SylphxAI/owner/blob/main/runbook/GOVERNANCE-AUDIT-2026-08-28.md),
+grounded in the rows above and `.github/workflows/release.yml`. This is dest,
+not live proof.
+
+- **Public probe.** `https://crates.io/crates/kernox` serves a published
+  version whose registry checksum equals the artifact checksum recorded in
+  that tag's `release-manifest.json` provenance receipt; `cargo add
+  kernox@<version>` resolves it from the registry.
+- **Owned writers.** The tag-gated `release.yml` is the sole release-intent
+  and publishing writer: tag must equal the workspace version and be an
+  ancestor of `main`, stable 1.x publication is refused, semver is checked
+  against published predecessors, packages are built `--locked`, a
+  `release-manifest.json` + `.sha256` provenance receipt is written, build
+  provenance is attested, and publication proceeds in dependency order with
+  registry readback. It also owns the Cargo workspace manifests and
+  `cargo-kernox`. No migration writers exist.
+- **Consumed receipts.** crates.io registry readback (index status, version
+  identity, checksum, not-yanked) is the publication truth it consumes;
+  GitHub build-provenance attestation receipts bind artifacts to the tagged
+  source revision; the `origin/main` ancestry check receipt binds the tag to
+  landed source.
+- **Runtime effects.** None beyond consumers: a kernel/library that runs
+  only inside consuming hosts, examples, and test hosts
+  (`kernox-host-*`, `kernox-example-*`); it deploys nothing.
+- **Forbidden writes.** Stable 1.x publication is intentionally refused until
+  the engine is admitted mature; it must not publish a version whose source
+  revision is not the tagged `main` commit, must not skip registry readback
+  or provenance attestation, and must not treat a green `cargo test` or a
+  version bump as release evidence (this file's edges rule). No second
+  publish writer.
