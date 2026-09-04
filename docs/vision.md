@@ -80,11 +80,9 @@ GitHub stars, crate downloads, plugin count without reuse, successful
 compilation without lifecycle proof, and green CI without a usable application
 path may help diagnose the product but cannot replace the North Star.
 
-This metric is not an identity in [`capabilities.md`](capabilities.md). It
-cannot close as a graph `Done when` while other products are forbidden from
-silently taking Kernox and production coupling still needs an accepted
-decision. Independent verified applications remain a live observation after
-that coupling decision.
+This metric is not an identity in [`capabilities.md`](capabilities.md).
+It is never a graph `Done when`, including after any production-coupling
+decision. Independent verified applications remain a live observation.
 
 ## Non-goals
 
