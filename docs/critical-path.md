@@ -1,4 +1,4 @@
-# Production critical path
+# Delivery critical path
 
 This path sequences risk; it does not reduce the destination. No gate is called
 an MVP, and no intermediate green state is a production-release claim.
@@ -69,9 +69,14 @@ Exit evidence:
 - Every workflow job runs on one approved Sylphx Platform self-hosted profile;
   the macOS portability lane is retained, while Windows portability remains an
   explicit Platform-owned acceptance residual until an approved profile exists.
-- API semantic-version checks pass against the admitted predecessor where one
-  exists.
+- API semantic-version checks pass against published predecessors when they
+  exist. `0.0.1` crate-name existence is not dest `0.1.x`.
 - Documentation examples compile from clean consumers.
+- The first public package probe is dest `0.1.x` (KR-PUBLISH): a tagged
+  workspace version that is an ancestor of `main`, published by the tag-gated
+  trusted-publishing writer and read back from crates.io. A 1.x compatibility
+  review is not that probe. Stable 1.x remains refused until the engine is
+  admitted mature.
 - Immutable packages are published in dependency order, a provenance receipt
   records the source revision, lockfile, toolchain, and crate checksums, and
   registry readback passes against those exact artifacts.

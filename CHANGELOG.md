@@ -11,6 +11,7 @@ evidence are mature.
 
 - Facade crate `kernox` package description now matches the README one-sentence purpose.
 - PRD and PROJECT.md now name dest `0.1.x` trusted publishing as the first public package probe; stable 1.x remains refused until the engine is admitted mature.
+- Compatibility policy and the delivery critical path now name dest `0.1.x` as the first public package probe and treat published `0.0.1` as crate-name existence, not dest, even when CI compares public APIs against that predecessor.
 
 ### Added
 

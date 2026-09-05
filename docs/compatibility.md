@@ -34,5 +34,7 @@ capability-grant, resource, and migration contract. Native dynamic libraries
 are not a supported extension mechanism.
 
 CI compares public library APIs with published predecessors when they exist.
-Before the first registry release there is no predecessor, so source review and
-consumer examples are the available compatibility evidence.
+`kernox@0.0.1` is crate-name existence bootstrap, not dest `0.1.x`. It is a
+published predecessor, so that comparison is evidence; it is not dest. Dest
+`0.1.x` (KR-PUBLISH) is the first public package probe. Source review and
+consumer examples remain compatibility evidence regardless of registry state.
