@@ -83,30 +83,8 @@ fn verify() -> Result<(), String> {
         &[],
     )?;
     enforce_core_dependency_boundary()?;
-    run(
-        "long-lived-example",
-        "cargo",
-        &["run", "--locked", "-p", "kernox-example-order-app", "--bin", "long_lived"],
-        &[],
-    )?;
-    run(
-        "serverless-example",
-        "cargo",
-        &["run", "--locked", "-p", "kernox-example-order-app", "--bin", "serverless"],
-        &[],
-    )?;
-    run(
-        "checkout-example",
-        "cargo",
-        &["run", "--locked", "-p", "kernox-example-checkout-app", "--bin", "checkout"],
-        &[],
-    )?;
-    run(
-        "worker-example",
-        "cargo",
-        &["run", "--locked", "-p", "kernox-example-worker-app", "--bin", "worker"],
-        &[],
-    )?;
+    enforce_no_cli_host_crate()?;
+    verify_host_examples()?;
     run(
         "clean-consumer",
         "cargo",
@@ -144,6 +122,35 @@ fn verify() -> Result<(), String> {
     run("dependency-policy", "cargo", &["deny", "check"], &[])?;
     run("advisories", "cargo", &["audit", "--deny", "warnings"], &[])?;
     run("core-package", "cargo", &["package", "--locked", "-p", "kernox-core"], &[])?;
+    Ok(())
+}
+
+fn verify_host_examples() -> Result<(), String> {
+    run(
+        "long-lived-example",
+        "cargo",
+        &["run", "--locked", "-p", "kernox-example-order-app", "--bin", "long_lived"],
+        &[],
+    )?;
+    run(
+        "serverless-example",
+        "cargo",
+        &["run", "--locked", "-p", "kernox-example-order-app", "--bin", "serverless"],
+        &[],
+    )?;
+    run(
+        "checkout-example",
+        "cargo",
+        &["run", "--locked", "-p", "kernox-example-checkout-app", "--bin", "checkout"],
+        &[],
+    )?;
+    enforce_cli_without_tokio()?;
+    run(
+        "worker-example",
+        "cargo",
+        &["run", "--locked", "-p", "kernox-example-worker-app", "--bin", "worker"],
+        &[],
+    )?;
     Ok(())
 }
 
@@ -389,6 +396,84 @@ fn run(
     if status.success() { Ok(()) } else { Err(format!("{label} exited with {status}")) }
 }
 
+fn enforce_no_cli_host_crate() -> Result<(), String> {
+    println!("verify.no-cli-host-crate");
+    let metadata = cargo_metadata()?;
+    let packages =
+        metadata["packages"].as_array().ok_or_else(|| "metadata packages missing".to_owned())?;
+    let workspace_members = metadata["workspace_members"]
+        .as_array()
+        .ok_or_else(|| "metadata workspace members missing".to_owned())?;
+    let workspace_member_ids: BTreeSet<&str> =
+        workspace_members.iter().filter_map(serde_json::Value::as_str).collect();
+    for package in packages {
+        let Some(id) = package["id"].as_str() else {
+            continue;
+        };
+        if !workspace_member_ids.contains(id) {
+            continue;
+        }
+        let Some(name) = package["name"].as_str() else {
+            continue;
+        };
+        if name == "kernox-host-cli" {
+            return Err(
+                "workspace contains kernox-host-cli; dest KR-HOST forbids a fourth CLI host crate"
+                    .to_owned(),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn package_names_from_cargo_tree(output: &str) -> BTreeSet<String> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() {
+                return None;
+            }
+            line.split_whitespace().next().map(str::to_owned)
+        })
+        .collect()
+}
+
+fn enforce_cli_without_tokio() -> Result<(), String> {
+    println!("verify.cli-without-tokio");
+    let output = Command::new("cargo")
+        .args([
+            "tree",
+            "-p",
+            "kernox-example-checkout-app",
+            "--locked",
+            "--edges",
+            "normal",
+            "--prefix",
+            "none",
+            "--format",
+            "{p}",
+        ])
+        .output()
+        .map_err(|error| format!("could not inspect checkout-app cargo tree: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "checkout-app cargo tree failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let names = package_names_from_cargo_tree(&stdout);
+    for forbidden in ["tokio", "tokio-util", "kernox-host-tokio", "kernox-host-cli"] {
+        if names.contains(forbidden) {
+            return Err(format!(
+                "CLI-without-Tokio checkout-app depends on forbidden host runtime {forbidden}"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn enforce_core_dependency_boundary() -> Result<(), String> {
     let metadata = cargo_metadata()?;
     let packages =
@@ -443,7 +528,10 @@ fn enforce_core_dependency_boundary() -> Result<(), String> {
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-    use super::{APPROVED_RUNNERS, format_runs_on, runner_profiles_from_workflow};
+    use super::{
+        APPROVED_RUNNERS, format_runs_on, package_names_from_cargo_tree,
+        runner_profiles_from_workflow,
+    };
 
     #[test]
     fn workflow_runner_profiles_are_the_job_runs_on_values() {
@@ -486,5 +574,22 @@ jobs:
         assert!(
             runner_profiles_from_workflow("jobs:\n  verify:\n    timeout-minutes: 5\n").is_err()
         );
+    }
+
+    #[test]
+    fn cargo_tree_package_names_detect_forbidden_host_runtimes() {
+        let names = package_names_from_cargo_tree(
+            "kernox-example-checkout-app v0.1.0 (/tmp/checkout)\nkernox v0.1.0 (/tmp/kernox)\ntokio v1.53.1\n",
+        );
+        assert!(names.contains("tokio"));
+        assert!(names.contains("kernox"));
+        assert!(!names.contains("kernox-host-cli"));
+    }
+
+    #[test]
+    fn cargo_tree_package_names_ignore_blank_lines() {
+        let names = package_names_from_cargo_tree("\n  kernox v0.1.0 (*)\n\n");
+        assert_eq!(names.len(), 1);
+        assert!(names.contains("kernox"));
     }
 }
