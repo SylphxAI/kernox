@@ -1,6 +1,6 @@
 [package]
 name = "kernox"
-description = "A high-performance composable application kernel for Rust"
+description = "Experimental embeddable Rust engine that composes a host and trusted in-process plugins into one deterministic capability graph"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
