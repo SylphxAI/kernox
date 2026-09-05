@@ -119,8 +119,10 @@ automation, and examples exercising real application paths.
 
 ## Release terminal
 
-The first public production release is admitted only when every required
-capability above has executable evidence in the acceptance matrix, the public
-API is reviewed for 1.x compatibility, all reference applications pass, and
-the release artifact is published and read back from its registry. There is no
-reduced MVP release path.
+The first public package probe is dest `0.1.x` (KR-PUBLISH): a tagged
+workspace version that is an ancestor of `main`, published by the tag-gated
+trusted-publishing writer and read back from crates.io. Every required
+capability above must have executable evidence in the acceptance matrix, and
+the reference applications must pass. There is no reduced MVP release path.
+Stable 1.x publication remains refused until the engine is admitted mature; a
+1.x compatibility review is not the first public probe.
