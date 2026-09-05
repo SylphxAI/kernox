@@ -10,6 +10,7 @@ evidence are mature.
 ### Changed
 
 - Facade crate `kernox` package description now matches the README one-sentence purpose.
+- PRD and PROJECT.md now name dest `0.1.x` trusted publishing as the first public package probe; stable 1.x remains refused until the engine is admitted mature.
 
 ### Added
 

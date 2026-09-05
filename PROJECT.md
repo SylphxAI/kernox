@@ -2,9 +2,7 @@
 
 ## Purpose
 
-Kernox is a graph-backed application kernel for composing Rust products from
-typed, lifecycle-safe plugins without adding a runtime framework tax to the
-application hot path.
+Kernox is an experimental embeddable Rust engine that composes a host and trusted in-process plugins into one deterministic capability graph.
 
 ## Product Vision
 
@@ -26,8 +24,8 @@ application path.
 
 ## Goals
 
-- Deliver the complete production-commercial-grade kernel contract defined in
-  `docs/prd.md` and its acceptance matrix.
+- Deliver the kernel contract defined in `docs/prd.md` and its acceptance
+  matrix.
 - Prove the same domain plugin unchanged in long-lived and serverless hosts.
 - Keep resolved hot-path overhead within the declared benchmark budget against
   direct Rust composition.
@@ -48,9 +46,10 @@ application path.
 
 ## Delivery
 
-The requested terminal is a public, production-commercial-grade source and
-package release. `cargo run -p xtask -- verify` is the repository verification
-entrypoint. A local diff, commit, pull request, merge, or green CI run is not a
+The requested public probe is dest `0.1.x` on crates.io via the tag-gated
+trusted-publishing writer. Stable 1.x publication remains refused until the
+engine is admitted mature. `cargo run -p xtask -- verify` is the repository
+verification entrypoint. A local diff, commit, pull request, merge, or green CI run is not a
 package-release claim. Release automation separately validates the publishable
 package set and dependency order with
 `cargo run --locked -p xtask -- release-check`, dry-runs the complete workspace
