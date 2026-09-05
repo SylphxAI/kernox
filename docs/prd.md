@@ -71,8 +71,12 @@ Tokio task scope with cancellation, draining, timeout, and leak reporting.
 
 ### KR-006 — Host SDK
 
-Ship long-lived Tokio, provider-neutral serverless invocation, CLI, and
-deterministic test hosts. Host-specific dependencies must not enter the core.
+Ship long-lived Tokio (`kernox-host-tokio`), provider-neutral serverless
+invocation (`kernox-host-serverless`), and a deterministic test host
+(`kernox-testkit`). CLI products compose the same graph through `AppBuilder`
+without Tokio; there is no `kernox-host-cli` crate. `cargo-kernox` is
+inspection tooling, not a host. Host-specific dependencies must not enter
+the core.
 
 ### KR-007 — Diagnostics and observability
 
@@ -110,6 +114,8 @@ automation, and examples exercising real application paths.
   plugins are isolated.
 - Forcing every function, entity, adapter, or crate to become a plugin.
 - Making different domain semantics reusable merely by packaging them alike.
+- A fourth CLI host crate (`kernox-host-cli`). CLI products compose through
+  `AppBuilder` without Tokio.
 
 ## Release terminal
 

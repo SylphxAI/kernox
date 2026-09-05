@@ -22,9 +22,10 @@ The repository keeps one reference application per distinct composition shape:
 
 1. `order-app`: a host-neutral domain graph reused by long-lived and warm
    serverless hosts, with fresh invocation scopes.
-2. `checkout-app`: an application service with two compatible payment
-   providers selected by an explicit binding, showing provider replacement
-   without changing the domain port.
+2. `checkout-app`: a CLI-without-Tokio application service that composes
+   through `AppBuilder` without Tokio, with two compatible payment providers
+   selected by an explicit binding, showing provider replacement without
+   changing the domain port.
 3. `worker-app`: a domain worker requiring the official Tokio task capability,
    showing named admission, cancellation, and clean drain on shutdown.
 4. `fixtures/clean-consumer`: a standalone public-facade consumer outside the
@@ -58,7 +59,8 @@ single noisy sample moves.
 ## Acceptance
 
 - Every example builds and runs from a clean workspace.
-- `checkout-app` proves explicit provider binding and unchanged domain code.
+- `checkout-app` proves CLI-without-Tokio composition through `AppBuilder`,
+  explicit provider binding, and unchanged domain code.
 - `worker-app` proves supervised task cancellation and clean shutdown.
 - `order-app` continues to pass the three-plugin conformance oracle.
 - `fixtures/clean-consumer --workload` exercises the complete typed graph from

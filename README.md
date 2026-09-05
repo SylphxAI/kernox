@@ -65,7 +65,8 @@ The examples cover distinct composition shapes:
 
 - [order-app](examples/order-app) reuses one domain graph under long-lived and
   warm serverless hosts;
-- [checkout-app](examples/checkout-app) swaps two payment adapters through an
+- [checkout-app](examples/checkout-app) is a CLI-without-Tokio product: it
+  composes through `AppBuilder` and swaps two payment adapters through an
   explicit binding without changing the checkout domain; and
 - [worker-app](examples/worker-app) delegates a named background task to the
   supervised Tokio host and drains it on shutdown.

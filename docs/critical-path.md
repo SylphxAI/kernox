@@ -37,8 +37,9 @@ Exit evidence:
 
 Exit evidence:
 
-- Tokio, provider-neutral serverless invocation, CLI, and deterministic test
-  hosts are implemented without contaminating core.
+- Long-lived Tokio, provider-neutral serverless invocation, CLI composition
+  through `AppBuilder` without Tokio, and deterministic test hosts run the
+  same graph without contaminating core. There is no fourth CLI host crate.
 - One unchanged domain plugin runs in both long-lived and serverless examples.
 - Request-specific state cannot cross warm serverless invocations.
 - Graph inspection and conformance tooling operate on versioned artifacts; the
