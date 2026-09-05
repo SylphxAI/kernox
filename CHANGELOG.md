@@ -7,6 +7,10 @@ evidence are mature.
 
 ## [Unreleased]
 
+### Changed
+
+- Facade crate `kernox` package description now matches the README one-sentence purpose.
+
 ### Added
 
 - Deterministic capability graph with versioned provider resolution, explicit
