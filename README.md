@@ -115,8 +115,11 @@ distributions have separate extended lanes.
 ## Release state
 
 Kernox is currently a pre-1.0 development engine. The workspace uses the
-`0.1.x` package train; no stable 1.0 publication is permitted while the public
-API and lifecycle contracts are still evolving.
+`0.1.x` package train. The first public package probe is dest `0.1.x`
+(KR-PUBLISH): a tagged workspace version that is an ancestor of `main`,
+published by the tag-gated trusted-publishing writer and read back from
+crates.io. `kernox@0.0.1` is crate-name existence bootstrap, not dest.
+Stable 1.x remains refused until the engine is admitted mature.
 
 Source correctness, pull-request CI, merge state, crates.io packages, and real
 product adoption are separate facts. Consult GitHub Actions/Releases and the
