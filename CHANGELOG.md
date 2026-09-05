@@ -13,6 +13,7 @@ evidence are mature.
 - PRD and PROJECT.md now name dest `0.1.x` trusted publishing as the first public package probe; stable 1.x remains refused until the engine is admitted mature.
 - Compatibility policy and the delivery critical path now name dest `0.1.x` as the first public package probe and treat published `0.0.1` as crate-name existence, not dest, even when CI compares public APIs against that predecessor.
 - README Release state now names dest `0.1.x` as the first public package probe and treats published `0.0.1` as crate-name existence, not dest.
+- Acceptance matrix title and README link no longer sell the pre-1.0 engine as Production; dest remains the acceptance matrix, not a production-release claim.
 
 ### Added
 
