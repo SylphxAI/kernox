@@ -12,7 +12,7 @@ readme.workspace = true
 publish = false
 
 [dependencies]
-kernox = { path = "../../crates/kernox", version = "0.1.0", features = ["tokio"] }
+kernox = { path = "../../crates/kernox", version = "0.1.1", features = ["tokio"] }
 semver.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "time"] }

@@ -117,7 +117,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "cargo-kernox"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "kernox-core",
@@ -504,7 +504,7 @@ dependencies = [
 
 [[package]]
 name = "kernox"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "criterion",
  "futures",
@@ -517,7 +517,7 @@ dependencies = [
 
 [[package]]
 name = "kernox-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "proptest",
  "semver",
@@ -528,7 +528,7 @@ dependencies = [
 
 [[package]]
 name = "kernox-example-checkout-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "futures",
  "kernox",
@@ -539,7 +539,7 @@ dependencies = [
 
 [[package]]
 name = "kernox-example-order-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "futures",
  "kernox",
@@ -551,7 +551,7 @@ dependencies = [
 
 [[package]]
 name = "kernox-example-worker-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "kernox",
  "semver",
@@ -561,7 +561,7 @@ dependencies = [
 
 [[package]]
 name = "kernox-host-serverless"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "futures",
  "kernox-core",
@@ -571,7 +571,7 @@ dependencies = [
 
 [[package]]
 name = "kernox-host-tokio"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "futures",
  "futures-util",
@@ -585,7 +585,7 @@ dependencies = [
 
 [[package]]
 name = "kernox-runtime"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "futures",
  "futures-util",
@@ -596,7 +596,7 @@ dependencies = [
 
 [[package]]
 name = "kernox-testkit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "futures",
  "kernox-core",
@@ -1236,7 +1236,7 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde_json",
  "serde_yaml",
