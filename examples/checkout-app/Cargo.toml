@@ -13,12 +13,12 @@ publish = false
 
 [dependencies]
 futures.workspace = true
-kernox = { path = "../../crates/kernox", version = "0.1.0" }
+kernox = { path = "../../crates/kernox", version = "0.1.1" }
 semver.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-kernox-testkit = { path = "../../crates/kernox-testkit", version = "0.1.0" }
+kernox-testkit = { path = "../../crates/kernox-testkit", version = "0.1.1" }
 
 [lints]
 workspace = true

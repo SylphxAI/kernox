@@ -7,6 +7,13 @@ evidence are mature.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-06
+
+First dest `0.1.x` public package probe. Immutable tag `v0.1.0` is not this
+probe: it is an ancestor of an older `main`, OIDC trusted publishing was not
+configured, and the tag must not be moved. `0.0.1` remains crate-name existence
+until dest `0.1.x` registry readback.
+
 ### Changed
 
 - Facade crate `kernox` package description now matches the README one-sentence purpose.
@@ -35,6 +42,8 @@ evidence are mature.
 - Independent composition-input and graph-report schema versions, with
   fail-closed report readers that reject an unsupported report major,
   reversed lifecycle order, duplicate plugins, and unknown plugin refs.
+- CLI products compose the same graph through `AppBuilder` without Tokio; there
+  is no `kernox-host-cli` crate.
 
 ### Fixed
 
@@ -46,5 +55,8 @@ evidence are mature.
 - Compile-fail oracle that `InitializationContext` cannot escape as `'static`.
 - Root capability acquisition now fails closed as soon as application shutdown
   begins, before cleanup hooks finish.
+- CLI-without-Tokio host contract (KR-006): `AppBuilder` composes without a
+  Tokio host crate, and the CLI host crate remains absent.
 
-[Unreleased]: https://github.com/SylphxAI/kernox/commits/main
+[Unreleased]: https://github.com/SylphxAI/kernox/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/SylphxAI/kernox/releases/tag/v0.1.1
