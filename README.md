@@ -7,7 +7,6 @@ Kernox is an experimental embeddable Rust engine that composes a host and truste
 - Vision: [`docs/vision.md`](docs/vision.md)
 - Capabilities: [`docs/capabilities.md`](docs/capabilities.md)
 - PRD: [`docs/prd.md`](docs/prd.md)
-- Decisions: [`docs/adr/`](docs/adr/)
 
 **Compose products. Keep domains pure.**
 
@@ -102,7 +101,6 @@ distributions have separate extended lanes.
 - [Product identity and North Star](PROJECT.md)
 - [Product requirements](docs/prd.md)
 - [Critical path and redesign triggers](docs/critical-path.md)
-- [Static graph architecture ADR](docs/adr/20260815T185400Z-static-capability-graph.md)
 - [Runtime semantics](docs/specs/20260815T185400Z-runtime-contract.md)
 - [Acceptance matrix](docs/specs/20260815T185400Z-acceptance.md)
 - [Standalone cardinality adopter](docs/specs/20260816-standalone-cardinality-adopter.md)

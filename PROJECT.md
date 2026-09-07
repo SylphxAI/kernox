@@ -64,6 +64,5 @@ attested provenance receipt before registry publication and readback.
 | [README.md](README.md) | Public entry and quick start |
 | [docs/prd.md](docs/prd.md) | Product capabilities and requirements |
 | [docs/critical-path.md](docs/critical-path.md) | Delivery gates and kill criteria |
-| [docs/adr/](docs/adr/) | Durable architecture decisions |
 | [docs/specs/](docs/specs/) | Runtime and acceptance contracts |
 | [SECURITY.md](SECURITY.md) | Supported security reporting path |
