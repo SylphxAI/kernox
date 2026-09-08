@@ -7,6 +7,10 @@ evidence are mature.
 
 ## [Unreleased]
 
+### Changed
+
+- Public listing, contributing path, delivery gates, and `GraphBuilder::new` rustdoc no longer sell Kernox as a default company kernel or a production product. Dest remains experimental-engine, not a default dependency.
+
 ## [0.1.1] - 2026-09-06
 
 First dest `0.1.x` public package probe. Immutable tag `v0.1.0` is not this

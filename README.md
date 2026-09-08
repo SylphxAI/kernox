@@ -4,6 +4,7 @@ Kernox is an experimental embeddable Rust engine that composes a host and truste
 
 - Ordinary: `none` — experimental engine; there is no public customer website.
 - Preview: `none` — there is no admitted product-owned preview or dogfood web host.
+- Default: `no` — not a default company dependency. Production coupling of any other product needs an accepted decision.
 - Vision: [`docs/vision.md`](docs/vision.md)
 - Capabilities: [`docs/capabilities.md`](docs/capabilities.md)
 - PRD: [`docs/prd.md`](docs/prd.md)

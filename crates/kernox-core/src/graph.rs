@@ -60,7 +60,7 @@ pub struct GraphBuilder {
 }
 
 impl GraphBuilder {
-    /// Creates an empty graph builder with production defaults.
+    /// Creates an empty graph builder with default resource limits.
     #[must_use]
     pub fn new() -> Self {
         Self::default()

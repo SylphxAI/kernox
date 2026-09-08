@@ -5,7 +5,7 @@ contract, architecture boundary, and public compatibility policy.
 
 Before opening a change:
 
-1. Read `PROJECT.md`, `docs/prd.md`, the runtime contract, and the relevant ADR.
+1. Read `PROJECT.md`, `docs/vision.md`, `docs/capabilities.md`, `docs/prd.md`, and the runtime contract.
 2. Add an executable regression or acceptance oracle for changed behavior.
 3. Run `cargo run -p xtask -- verify` with the pinned Rust toolchain.
 4. Explain public API, performance, security, and compatibility effects in the
