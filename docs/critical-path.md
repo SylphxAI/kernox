@@ -45,7 +45,7 @@ Exit evidence:
 - Graph inspection and conformance tooling operate on versioned artifacts; the
   three-plugin reference application passes the executable conformance oracle.
 
-## Gate 4 — Production hardening
+## Gate 4 — Engine hardening
 
 Exit evidence:
 
