@@ -91,10 +91,10 @@ benchmark job `success`, revision
 −0.034149, and +0.009471 (median −0.004128; per-run spread 0.043620), and the
 per-side minima (direct 1.373721 ns, Kernox 1.362712 ns) gave the enforced
 statistic −0.008014 → `bench-budget.result=pass`. The observed 0.043620 spread
-with five runs is the lane's noise floor for this statistical method; the
-workflow run also contains the mutation and fuzz jobs, whose failing state is
-independent of this change, while the benchmark job itself completed
-`success`. The retained extended-lane measurement artifact
+with five runs is the lane's noise floor for this statistical method. In that
+run the benchmark and fuzz jobs completed `success` while the mutation job
+failed, which is its pre-existing state on `main` (audit finding F1) and is
+independent of this change. The retained extended-lane measurement artifact
 `kernox-benchmark-9a9d3f9037756cbb0345578a9b21a9f55c5aa31b` from schedule run
 34080224078 predates this gate; the claim-honesty change records its detailed
 numbers.
