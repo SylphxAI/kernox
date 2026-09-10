@@ -57,8 +57,9 @@ Exit evidence:
   hand-written Rust baseline; budgets in the acceptance contract hold.
 - Dependency, license, advisory, and unsafe-code boundaries are green, and the
   pinned full-history credential scan in the repository verification entrypoint
-  reports no committed secrets. The scan is rule-based detection over Git
-  history, not a proof that no secret exists.
+  reports no committed secrets with no repository-controlled suppression file.
+  The scan is rule-based detection over Git history, not a proof that no secret
+  exists.
 
 ## Gate 5 — Release
 

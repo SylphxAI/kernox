@@ -24,6 +24,17 @@ const APPROVED_RUNNERS: [&str; 2] =
 const GITLEAKS_VERSION: &str = "8.30.1";
 const GITLEAKS_LINUX_X64_ARCHIVE_SHA256: &str =
     "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb";
+/// sha256 of the `gitleaks` binary extracted from that pinned archive.
+const GITLEAKS_LINUX_X64_BINARY_SHA256: &str =
+    "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509";
+/// Repository-controlled files that could suppress findings. The scan fails
+/// closed while either exists in the worktree or in Git history: gitleaks
+/// always honours `(source)/.gitleaksignore`, so a committed ignore file would
+/// otherwise neuter the gate silently.
+const GITLEAKS_SUPPRESSION_PATHS: [&str; 2] = [".gitleaks.toml", ".gitleaksignore"];
+/// External scan config: extend the scanner defaults and ignore nothing.
+const GITLEAKS_EXTERNAL_CONFIG: &str =
+    "# Pinned by xtask: default rules, no allowlists.\n[extend]\nuseDefault = true\n";
 
 fn main() -> ExitCode {
     let mut arguments = std::env::args().skip(1);
@@ -403,13 +414,28 @@ fn run(
     if status.success() { Ok(()) } else { Err(format!("{label} exited with {status}")) }
 }
 
-/// Fails closed unless the pinned gitleaks reports no committed credentials in
-/// the full repository history.
+/// Fails closed unless a pinned, checksum-verified gitleaks reports no
+/// committed credentials in the full repository history.
+///
+/// Repository-controlled configuration is never honoured: the scan runs with
+/// an external config that extends the default rules, an external ignore path,
+/// and `--ignore-gitleaks-allow`, and the gate refuses to run at all while a
+/// repository-controlled suppression file exists.
 fn verify_secret_scan() -> Result<(), String> {
+    println!("verify.secret-scan-suppression");
+    enforce_no_repository_suppression()?;
     println!("verify.secret-scan");
     let scanner = pinned_gitleaks()?;
+    let boundary = SecretScanBoundary::create()?;
     let status = Command::new(&scanner)
-        .args(["git", "--no-banner", "--redact", "--verbose", "--log-opts=--all", "."])
+        .env_remove("GITLEAKS_CONFIG")
+        .env_remove("GITLEAKS_CONFIG_TOML")
+        .args(["git", "--no-banner", "--redact", "--verbose", "--log-opts=--all", "--config"])
+        .arg(&boundary.config)
+        .arg("--gitleaks-ignore-path")
+        .arg(&boundary.ignores)
+        .arg("--ignore-gitleaks-allow")
+        .arg(".")
         .status()
         .map_err(|error| format!("could not run {}: {error}", scanner.display()))?;
     if !status.success() {
@@ -420,24 +446,126 @@ fn verify_secret_scan() -> Result<(), String> {
     Ok(())
 }
 
-/// Returns a gitleaks binary at [`GITLEAKS_VERSION`].
+/// Refuses to run while a repository-controlled gitleaks suppression file
+/// exists in the worktree or in Git history.
 ///
-/// An exact-version scanner already on `PATH` wins. Otherwise the pinned,
-/// checksum-verified Linux x64 release is installed under `target/kernox-tools`:
-/// the tag workflow runs this same entrypoint without installing a scanner, so
-/// the oracle provisions itself and still fails closed when it cannot.
-fn pinned_gitleaks() -> Result<PathBuf, String> {
-    let from_path = PathBuf::from("gitleaks");
-    if matches!(gitleaks_version(&from_path)?.as_deref(), Some(GITLEAKS_VERSION)) {
-        return Ok(from_path);
+/// A repository `.gitleaks.toml` is already overridden by the external config,
+/// but gitleaks always loads `(source)/.gitleaksignore` regardless of
+/// `--gitleaks-ignore-path`; failing closed here is what keeps that vector from
+/// silently neutering the gate.
+fn enforce_no_repository_suppression() -> Result<(), String> {
+    for path in GITLEAKS_SUPPRESSION_PATHS {
+        if Path::new(path).exists() {
+            return Err(format!(
+                "repository-controlled secret-scan suppression file {path} exists in the worktree; remove it and fix findings instead (the pinned scanner only honours its external config)"
+            ));
+        }
+        let output = Command::new("git")
+            .args(["log", "--all", "--format=%H", "--", path])
+            .output()
+            .map_err(|error| format!("could not inspect Git history for {path}: {error}"))?;
+        if !output.status.success() {
+            return Err(format!("Git history inspection for {path} exited with {}", output.status));
+        }
+        let commits = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .count();
+        if commits > 0 {
+            return Err(format!(
+                "repository-controlled secret-scan suppression file {path} exists in Git history ({commits} commit(s) touch it); remove it from history and fix findings instead (the pinned scanner only honours its external config)"
+            ));
+        }
     }
+    Ok(())
+}
+
+/// External scan boundary: a private config that extends the default rules and
+/// an empty ignore directory, both outside the repository, removed at drop.
+struct SecretScanBoundary {
+    root: PathBuf,
+    config: PathBuf,
+    ignores: PathBuf,
+}
+
+impl SecretScanBoundary {
+    fn create() -> Result<Self, String> {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default();
+        let root =
+            std::env::temp_dir().join(format!("kernox-secret-scan-{}-{nonce}", std::process::id()));
+        let config = root.join("config.toml");
+        let ignores = root.join("ignores");
+        fs::create_dir_all(&ignores)
+            .map_err(|error| format!("could not create {}: {error}", ignores.display()))?;
+        fs::write(&config, GITLEAKS_EXTERNAL_CONFIG)
+            .map_err(|error| format!("could not write {}: {error}", config.display()))?;
+        Ok(Self { root, config, ignores })
+    }
+}
+
+impl Drop for SecretScanBoundary {
+    fn drop(&mut self) {
+        drop(fs::remove_dir_all(&self.root));
+    }
+}
+
+/// Returns a gitleaks binary whose bytes match the pinned release artifact.
+///
+/// A `PATH` binary is trusted only after its sha256 matches the pinned release
+/// binary; a same-version imposter is rejected. The `target/kernox-tools` cache
+/// is re-verified on every run, and a first use downloads and checksum-verifies
+/// the pinned release. Any failure to obtain a verified scanner is fatal.
+fn pinned_gitleaks() -> Result<PathBuf, String> {
     let install_dir =
         Path::new("target").join("kernox-tools").join(format!("gitleaks-{GITLEAKS_VERSION}"));
-    let installed = install_dir.join("gitleaks");
-    if matches!(gitleaks_version(&installed)?.as_deref(), Some(GITLEAKS_VERSION)) {
-        return Ok(installed);
+    let mut candidates = Vec::new();
+    if let Some(on_path) = resolve_on_path("gitleaks") {
+        candidates.push(on_path);
+    }
+    candidates.push(install_dir.join("gitleaks"));
+    for candidate in candidates {
+        if is_pinned_gitleaks(&candidate)? {
+            return Ok(candidate);
+        }
     }
     install_pinned_gitleaks(&install_dir)
+}
+
+fn resolve_on_path(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|directory| directory.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+fn is_pinned_gitleaks(program: &Path) -> Result<bool, String> {
+    if file_sha256(program)?.as_deref() != Some(GITLEAKS_LINUX_X64_BINARY_SHA256) {
+        return Ok(false);
+    }
+    match gitleaks_version(program)? {
+        Some(version) if version == GITLEAKS_VERSION => Ok(true),
+        other => Err(format!(
+            "gitleaks at {} matches the pinned release checksum but reports {other:?}, expected {GITLEAKS_VERSION}",
+            program.display()
+        )),
+    }
+}
+
+fn file_sha256(path: &Path) -> Result<Option<String>, String> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let output = Command::new("sha256sum")
+        .arg(path)
+        .output()
+        .map_err(|error| format!("could not checksum {}: {error}", path.display()))?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).split_whitespace().next().map(str::to_owned))
 }
 
 fn gitleaks_version(program: &Path) -> Result<Option<String>, String> {
@@ -455,7 +583,9 @@ fn gitleaks_version(program: &Path) -> Result<Option<String>, String> {
 fn install_pinned_gitleaks(install_dir: &Path) -> Result<PathBuf, String> {
     if (std::env::consts::OS, std::env::consts::ARCH) != ("linux", "x86_64") {
         return Err(format!(
-            "gitleaks {GITLEAKS_VERSION} is required for the secret scan; install the pinned release from https://github.com/gitleaks/gitleaks/releases/tag/v{GITLEAKS_VERSION} and put it on PATH"
+            "the pinned gitleaks {GITLEAKS_VERSION} secret-scan oracle is checksum-verified for linux x86_64 only; this host is {}/{} and has no checksum-matching scanner, so verification fails closed",
+            std::env::consts::OS,
+            std::env::consts::ARCH
         ));
     }
     let archive_name = format!("gitleaks_{GITLEAKS_VERSION}_linux_x64.tar.gz");
@@ -473,7 +603,7 @@ fn install_pinned_gitleaks(install_dir: &Path) -> Result<PathBuf, String> {
         .map_err(|error| format!("could not download pinned gitleaks: {error}"))?;
     if !download.success() {
         return Err(format!(
-            "could not download pinned gitleaks {GITLEAKS_VERSION} from {download_url} ({download}); install it manually and put it on PATH"
+            "could not download pinned gitleaks {GITLEAKS_VERSION} from {download_url} ({download}); install the pinned binary manually (sha256 {GITLEAKS_LINUX_X64_BINARY_SHA256}) and put it on PATH"
         ));
     }
     let checksum = Command::new("sha256sum")
@@ -501,11 +631,13 @@ fn install_pinned_gitleaks(install_dir: &Path) -> Result<PathBuf, String> {
         return Err(format!("could not extract pinned gitleaks archive ({extract})"));
     }
     let installed = install_dir.join("gitleaks");
-    match gitleaks_version(&installed)?.as_deref() {
-        Some(GITLEAKS_VERSION) => Ok(installed),
-        other => {
-            Err(format!("provisioned gitleaks reports {other:?}, expected {GITLEAKS_VERSION}"))
-        }
+    if is_pinned_gitleaks(&installed)? {
+        Ok(installed)
+    } else {
+        Err(format!(
+            "provisioned gitleaks at {} does not match the pinned release binary checksum",
+            installed.display()
+        ))
     }
 }
 

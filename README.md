@@ -92,8 +92,11 @@ cargo run --locked -p xtask -- verify
 
 It runs formatting, all-target checks, Clippy, tests, rustdoc, the runtime-free
 core boundary, both product paths, dependency policy, RustSec audit, a pinned
-full-history secret scan, and the independently packageable core artifact.
-Fuzz, mutation, and benchmark distributions have separate extended lanes.
+full-history gitleaks secret scan, and the independently packageable core
+artifact. The secret scan pins gitleaks v8.30.1 (linux x86_64), uses a
+checksum-matching scanner from `PATH` or `target/kernox-tools`, and downloads
+and checksum-verifies the pinned release on first use. Fuzz, mutation, and
+benchmark distributions have separate extended lanes.
 
 ## Design and operating contract
 
