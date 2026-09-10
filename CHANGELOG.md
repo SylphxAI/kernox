@@ -13,22 +13,28 @@ evidence are mature.
 
 ## [0.1.1]
 
-Not a published release, and no release date is recorded. The first dest
+Not a published release, and no release date is recorded. The current dest
 `0.1.x` package-probe candidate exists as tag `v0.1.1` (lightweight tag pushed
 2026-09-10, commit `bb4a2e1`), but the tag-gated publisher has not completed
 crates.io readback: crates.io serves only `0.0.1` (not yanked) for all seven
-packages.
+packages. An earlier package-probe candidate, annotated tag `v0.1.0`, was never
+published either: its release run failed at OIDC authentication.
 
-Evidence verified 2026-09-10: release run `34530199204` failed at OIDC
-authentication (error: `No Trusted Publishing config found for repository
-SylphxAI/kernox`) and skipped the publish/readback step; no GitHub Release
-exists for the tag (`releases/tags/v0.1.1` returns 404); `git ls-remote --tags
-origin` shows `refs/tags/v0.1.1` = `bb4a2e13807b0d1951c253b0e30941f8008d674b`
-with no dereferenced `^{}` line (lightweight); the crates.io versions API
-returns only `0.0.1` for `kernox`, `kernox-core`, `kernox-runtime`,
+Evidence verified 2026-09-10: release run `34530199204` for `v0.1.1` failed at
+OIDC authentication (error: `No Trusted Publishing config found for repository
+SylphxAI/kernox`) and skipped the publish/readback step; the `v0.1.0` tag object
+`e9da6a185f2ab6fa82ee36bdc5b8c2dba0beb30f` is annotated (tagger
+`2026-09-04T08:35:04Z`, message "Public crates.io probe for workspace 0.1.0"),
+and its release run `33854145664` failed with the same OIDC error and skipped
+publish/readback; no GitHub Release exists for `v0.1.1`
+(`releases/tags/v0.1.1` returns 404); `git ls-remote --tags origin` shows
+`refs/tags/v0.1.1` = `bb4a2e13807b0d1951c253b0e30941f8008d674b` with no
+dereferenced `^{}` line (lightweight) and `refs/tags/v0.1.0` =
+`e9da6a185f2ab6fa82ee36bdc5b8c2dba0beb30f` with dereferenced commit
+`9cd90c538795ac82d8bcd5d11642e68712d0e658`; the crates.io versions API returns
+only `0.0.1` for `kernox`, `kernox-core`, `kernox-runtime`,
 `kernox-host-serverless`, `kernox-host-tokio`, `kernox-testkit`, and
-`cargo-kernox`. Immutable tag `v0.1.0` is an older ancestor and is not this
-probe; `0.0.1` remains crate-name existence until dest `0.1.x` registry
+`cargo-kernox`. `0.0.1` remains crate-name existence until dest `0.1.x` registry
 readback.
 
 ### Changed

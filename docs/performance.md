@@ -116,21 +116,31 @@ steady-state-call/kernox-extracted-arc-dyn-trait
                         time:   [1.3265 ns 1.3287 ns 1.3314 ns]
 ```
 
-| Path | Point estimate | 95% confidence interval |
+The console `time:` line Criterion 0.8.2 prints is rendered from its
+`typical()` estimate, which is the slope estimate when one is available and the
+mean otherwise (`criterion-0.8.2/src/estimate.rs`); the values above are those
+console values. The steady-state budget gate reads `mean.point_estimate` from
+Criterion's machine-readable `estimates.json` instead. The retained artifact
+holds only console text, so the comparison below is stated on the console values
+and does not by itself assert the mean-based gate decision for this run.
+
+| Path | Console `time:` estimate | 95% confidence interval |
 | --- | ---: | ---: |
 | Direct `Arc<dyn Trait>` call | 1.3369 ns | 1.3314–1.3440 ns |
 | Kernox-extracted `Arc<dyn Trait>` call | 1.3287 ns | 1.3265–1.3314 ns |
 
-The point-estimate delta is approximately −0.61% (Kernox-extracted below
-direct). The printed confidence intervals share only the endpoint 1.3314 ns and
-do not otherwise overlap. The declared 2% budget holds on this observation.
+The point-estimate delta on the recorded console values is approximately −0.61%
+(Kernox-extracted below direct). The printed confidence intervals share only the
+endpoint 1.3314 ns and do not otherwise overlap. The declared 2% budget holds on
+this observation.
 
-Limits: this is one scheduled observation at Criterion's default sampling. The
-artifact does not record the runner's machine class, and a single Criterion
-comparison is not a stable contract (the 2026-08-16 matrix above records a
-roughly 2% spread on the same machine). This section records the budget
-comparison for that run; it does not establish the budget as a
-distribution-level guarantee, and budget enforcement is a separate gate.
+Limits: this is one scheduled observation at Criterion's default sampling; the
+artifact does not record the runner's machine class. The 2026-08-16 development
+matrix above records a roughly 2% spread between steady-state runs on the desk
+machine (Linux 6.18.18 x86_64, AMD EPYC 9454), which is not the extended-lane
+runner. A single Criterion comparison is therefore not a stable contract, and
+this section records the budget comparison for that one run rather than a
+distribution-level guarantee.
 
 ## What this does not prove
 
