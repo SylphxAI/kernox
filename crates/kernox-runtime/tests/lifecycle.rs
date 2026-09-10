@@ -9,12 +9,13 @@ use std::sync::{
 
 use futures::executor::block_on;
 use kernox_core::{
-    CapabilityId, CapabilityOffer, CapabilityRequirement, PluginDescriptor, PluginId,
+    Binding, CapabilityId, CapabilityOffer, CapabilityRequirement, PluginDescriptor, PluginId,
 };
 use kernox_runtime::{
-    AppBuilder, BoxFuture, Capability, InitializationContext, LifecycleContext,
-    LifecycleObservation, ObservationSink, Plugin, PluginError, ProvisionSet, ScopeError,
-    ScopeState,
+    AppBuilder, AppResolveError, BoxFuture, Capability, CapabilityContract, FailureRecord,
+    HostCapability, HostRequirement, HostResolutionError, InitializationContext, LifecycleContext,
+    LifecycleObservation, LifecycleOutcome, LifecyclePhase, ObservationSink, Plugin, PluginError,
+    ProvisionSet, ScopeError, ScopeState, ShutdownReport,
 };
 use semver::{Version, VersionReq};
 
@@ -809,6 +810,485 @@ fn closed_invocation_scopes_do_not_block_later_admission() {
         assert!(app.shutdown().await.is_clean());
         assert_eq!(app.invocation_scope().err(), Some(ScopeError));
     });
+}
+
+struct TickClock(u64);
+
+impl Clock for TickClock {
+    fn tick(&self) -> u64 {
+        self.0
+    }
+}
+
+struct FixedClockProvider {
+    descriptor: PluginDescriptor,
+    tick: u64,
+}
+
+impl FixedClockProvider {
+    fn new(id: &str, tick: u64) -> Self {
+        Self {
+            descriptor: PluginDescriptor::new(plugin_id(id), version())
+                .provide(CapabilityOffer::new(capability_id(ClockCapability::ID), version()))
+                .unwrap(),
+            tick,
+        }
+    }
+}
+
+impl Plugin for FixedClockProvider {
+    fn descriptor(&self) -> &PluginDescriptor {
+        &self.descriptor
+    }
+
+    fn initialize<'a>(
+        &'a mut self,
+        _context: InitializationContext<'a>,
+    ) -> BoxFuture<'a, Result<ProvisionSet, PluginError>> {
+        let clock: Arc<dyn Clock> = Arc::new(TickClock(self.tick));
+        Box::pin(async move {
+            ProvisionSet::new()
+                .provide::<ClockCapability>(clock)
+                .map_err(|error| PluginError::new(error.tag(), error.to_string()))
+        })
+    }
+}
+
+#[test]
+fn binding_selects_the_declared_provider_through_the_application_builder() {
+    block_on(async {
+        let mut app = AppBuilder::new()
+            .plugin(ConsumerPlugin::new(Arc::new(Mutex::new(Vec::new()))))
+            .plugin(FixedClockProvider::new("dev.example.clock-a", 1))
+            .plugin(FixedClockProvider::new("dev.example.clock-b", 2))
+            .binding(Binding::new(
+                plugin_id("dev.example.consumer"),
+                capability_id(ClockCapability::ID),
+                plugin_id("dev.example.clock-b"),
+            ))
+            .resolve()
+            .expect("the binding must select one of the two providers")
+            .start()
+            .await
+            .unwrap();
+
+        let selected =
+            app.capability_from::<ClockCapability>(&plugin_id("dev.example.clock-b")).unwrap();
+        assert_eq!(selected.tick(), 2);
+        assert_eq!(
+            app.capability_from::<ClockCapability>(&plugin_id("dev.example.clock-a"))
+                .unwrap()
+                .tick(),
+            1
+        );
+        assert!(app.shutdown().await.is_clean());
+    });
+}
+
+#[derive(Default)]
+struct RecordingSink {
+    observations: Mutex<Vec<LifecycleObservation>>,
+}
+
+impl RecordingSink {
+    fn snapshot(&self) -> Vec<LifecycleObservation> {
+        self.observations.lock().unwrap().clone()
+    }
+}
+
+impl ObservationSink for RecordingSink {
+    fn record(&self, observation: LifecycleObservation) {
+        self.observations.lock().unwrap().push(observation);
+    }
+}
+
+#[test]
+fn observation_sink_records_every_completed_hook() {
+    block_on(async {
+        let recorder = Arc::new(RecordingSink::default());
+        let sink: Arc<dyn ObservationSink> = recorder.clone();
+        let mut app = AppBuilder::new()
+            .plugin(ClockPlugin::new(Arc::new(Mutex::new(Vec::new()))))
+            .observation_sink(sink)
+            .resolve()
+            .unwrap()
+            .start()
+            .await
+            .unwrap();
+        let scope = app.scope().id();
+        assert!(app.shutdown().await.is_clean());
+
+        let clock = plugin_id("dev.example.clock-plugin");
+        let observed: Vec<_> = recorder
+            .snapshot()
+            .into_iter()
+            .map(|event| (event.plugin, event.scope, event.phase, event.outcome))
+            .collect();
+        assert_eq!(
+            observed,
+            [
+                (clock.clone(), scope, LifecyclePhase::Initialize, LifecycleOutcome::Succeeded),
+                (clock.clone(), scope, LifecyclePhase::Start, LifecycleOutcome::Succeeded),
+                (clock.clone(), scope, LifecyclePhase::Quiesce, LifecycleOutcome::Succeeded),
+                (clock.clone(), scope, LifecyclePhase::Stop, LifecycleOutcome::Succeeded),
+                (clock, scope, LifecyclePhase::Dispose, LifecycleOutcome::Succeeded),
+            ]
+        );
+    });
+}
+
+struct FailingStartPlugin {
+    descriptor: PluginDescriptor,
+    tag: &'static str,
+}
+
+impl Plugin for FailingStartPlugin {
+    fn descriptor(&self) -> &PluginDescriptor {
+        &self.descriptor
+    }
+
+    fn initialize<'a>(
+        &'a mut self,
+        _context: InitializationContext<'a>,
+    ) -> BoxFuture<'a, Result<ProvisionSet, PluginError>> {
+        Box::pin(async { Ok(ProvisionSet::new()) })
+    }
+
+    fn start<'a>(
+        &'a mut self,
+        _context: LifecycleContext<'a>,
+    ) -> BoxFuture<'a, Result<(), PluginError>> {
+        let tag = self.tag;
+        Box::pin(async move { Err(PluginError::new(tag, "injected start failure")) })
+    }
+}
+
+#[test]
+fn failed_hooks_are_observed_with_sanitized_error_tags() {
+    block_on(async {
+        let oversized: &'static str = Box::leak("z".repeat(200).into_boxed_str());
+        for tag in ["", "Ab", oversized, "ab_c", "-ab"] {
+            let recorder = Arc::new(RecordingSink::default());
+            let sink: Arc<dyn ObservationSink> = recorder.clone();
+            let failure = AppBuilder::new()
+                .plugin(FailingStartPlugin {
+                    descriptor: PluginDescriptor::new(plugin_id("dev.example.failing"), version()),
+                    tag,
+                })
+                .observation_sink(sink)
+                .resolve()
+                .unwrap()
+                .start()
+                .await
+                .err()
+                .expect("the start hook must fail the boot");
+
+            assert_eq!(failure.primary.error_tag, "plugin.invalid-error-tag", "tag {tag:?}");
+            assert_eq!(failure.primary.message, "injected start failure");
+            assert_eq!(failure.primary.phase, LifecyclePhase::Start);
+
+            let observed = recorder.snapshot();
+            let failed: Vec<_> = observed
+                .iter()
+                .filter(|event| event.outcome != LifecycleOutcome::Succeeded)
+                .collect();
+            assert_eq!(failed.len(), 1, "tag {tag:?}");
+            assert_eq!(failed[0].phase, LifecyclePhase::Start, "tag {tag:?}");
+            assert_eq!(
+                failed[0].outcome,
+                LifecycleOutcome::Failed { error_tag: "plugin.invalid-error-tag" },
+                "tag {tag:?}"
+            );
+        }
+    });
+}
+
+struct HostRequirementPlugin {
+    descriptor: PluginDescriptor,
+    requirements: Vec<HostRequirement>,
+}
+
+impl HostRequirementPlugin {
+    fn new(id: &str, requirements: Vec<HostRequirement>) -> Self {
+        Self { descriptor: PluginDescriptor::new(plugin_id(id), version()), requirements }
+    }
+}
+
+impl Plugin for HostRequirementPlugin {
+    fn descriptor(&self) -> &PluginDescriptor {
+        &self.descriptor
+    }
+
+    fn host_requirements(&self) -> Vec<HostRequirement> {
+        self.requirements.clone()
+    }
+
+    fn initialize<'a>(
+        &'a mut self,
+        _context: InitializationContext<'a>,
+    ) -> BoxFuture<'a, Result<ProvisionSet, PluginError>> {
+        Box::pin(async { Ok(ProvisionSet::new()) })
+    }
+}
+
+#[test]
+fn host_capability_negotiation_fails_closed_before_readiness() {
+    block_on(async {
+        let host_id = capability_id("dev.kernox.host.runtime");
+        let requirement = HostRequirement::new(host_id.clone(), VersionReq::parse("^1.0").unwrap());
+        let consumer =
+            || HostRequirementPlugin::new("dev.example.host-consumer", vec![requirement.clone()]);
+
+        let missing = AppBuilder::new()
+            .plugin(consumer())
+            .resolve()
+            .err()
+            .expect("a missing host capability must fail resolution");
+        assert_eq!(missing.tag(), "host.missing-capability");
+        assert!(matches!(missing, AppResolveError::Host(_)));
+
+        let incompatible = AppBuilder::new()
+            .plugin(consumer())
+            .host_capability(HostCapability::new(host_id.clone(), Version::new(2, 0, 0)))
+            .resolve()
+            .err()
+            .expect("an incompatible host capability must fail resolution");
+        assert_eq!(incompatible.tag(), "host.incompatible-capability");
+
+        let duplicate_requirement = AppBuilder::new()
+            .plugin(HostRequirementPlugin::new(
+                "dev.example.host-consumer",
+                vec![requirement.clone(), requirement.clone()],
+            ))
+            .host_capability(HostCapability::new(host_id.clone(), Version::new(1, 0, 0)))
+            .resolve()
+            .err()
+            .expect("a duplicate host requirement must fail resolution");
+        assert_eq!(duplicate_requirement.tag(), "host.duplicate-requirement");
+
+        let duplicate_capability = AppBuilder::new()
+            .plugin(consumer())
+            .host_capability(HostCapability::new(host_id.clone(), Version::new(1, 0, 0)))
+            .host_capability(HostCapability::new(host_id, Version::new(1, 0, 0)))
+            .resolve()
+            .err()
+            .expect("a duplicate host capability must fail resolution");
+        assert_eq!(duplicate_capability.tag(), "host.duplicate-capability");
+
+        let mut app = AppBuilder::new()
+            .plugin(consumer())
+            .host_capability(HostCapability::new(
+                capability_id("dev.kernox.host.runtime"),
+                Version::new(1, 4, 0),
+            ))
+            .resolve()
+            .expect("a supplied matching host capability must be accepted")
+            .start()
+            .await
+            .expect("host negotiation happens before initialization");
+        assert!(app.shutdown().await.is_clean());
+    });
+}
+
+#[test]
+fn application_scope_closes_after_shutdown() {
+    block_on(async {
+        let mut app = AppBuilder::new().resolve().unwrap().start().await.unwrap();
+        assert_eq!(app.scope().state(), ScopeState::Open);
+        assert!(!app.scope().is_closing());
+
+        assert!(app.shutdown().await.is_clean());
+        assert_eq!(app.scope().state(), ScopeState::Closed);
+        assert!(app.scope().is_closing());
+        assert_eq!(app.invocation_scope().err(), Some(ScopeError));
+    });
+}
+
+struct AdmissionProbePlugin {
+    descriptor: PluginDescriptor,
+}
+
+impl Plugin for AdmissionProbePlugin {
+    fn descriptor(&self) -> &PluginDescriptor {
+        &self.descriptor
+    }
+
+    fn initialize<'a>(
+        &'a mut self,
+        _context: InitializationContext<'a>,
+    ) -> BoxFuture<'a, Result<ProvisionSet, PluginError>> {
+        Box::pin(async { Ok(ProvisionSet::new()) })
+    }
+
+    fn quiesce<'a>(
+        &'a mut self,
+        context: LifecycleContext<'a>,
+    ) -> BoxFuture<'a, Result<(), PluginError>> {
+        let closing = context.scope().is_closing();
+        Box::pin(async move {
+            if closing {
+                Ok(())
+            } else {
+                Err(PluginError::new("scope.admission-open", "quiesce ran before admission closed"))
+            }
+        })
+    }
+}
+
+#[test]
+fn quiesce_runs_after_scope_admission_closes() {
+    block_on(async {
+        let mut app = AppBuilder::new()
+            .plugin(AdmissionProbePlugin {
+                descriptor: PluginDescriptor::new(plugin_id("dev.example.probe"), version()),
+            })
+            .resolve()
+            .unwrap()
+            .start()
+            .await
+            .unwrap();
+
+        let report = app.shutdown().await;
+        let failures = &report.failures;
+        assert!(report.is_clean(), "unexpected cleanup failures: {failures:?}");
+    });
+}
+
+struct InvalidIdentifierCapability;
+
+impl Capability for InvalidIdentifierCapability {
+    type Interface = dyn Clock;
+
+    const ID: &'static str = "Invalid";
+    const VERSION: &'static str = "1.0.0";
+}
+
+struct InvalidVersionCapability;
+
+impl Capability for InvalidVersionCapability {
+    type Interface = dyn Clock;
+
+    const ID: &'static str = "dev.example.invalid-version";
+    const VERSION: &'static str = "not-a-version";
+}
+
+#[test]
+fn capability_contracts_expose_parsed_constants_and_stable_tags() {
+    let contract = CapabilityContract::of::<ClockCapability>().unwrap();
+    assert_eq!(contract.id().as_str(), "dev.example.clock");
+    assert_eq!(contract.version(), &Version::new(1, 0, 0));
+    assert!(contract.marker_name().ends_with("ClockCapability"));
+    assert!(!contract.marker_name().is_empty());
+
+    let invalid_identifier = CapabilityContract::of::<InvalidIdentifierCapability>().unwrap_err();
+    assert_eq!(invalid_identifier.tag(), "contract.invalid-identifier");
+    let invalid_version = CapabilityContract::of::<InvalidVersionCapability>().unwrap_err();
+    assert_eq!(invalid_version.tag(), "contract.invalid-version");
+}
+
+#[test]
+fn app_resolve_error_tags_cover_graph_and_host_failures() {
+    let graph = AppBuilder::new()
+        .plugin(ConsumerPlugin::new(Arc::new(Mutex::new(Vec::new()))))
+        .resolve()
+        .err()
+        .expect("a missing provider must fail resolution");
+    assert!(matches!(graph, AppResolveError::Graph(_)));
+    assert_eq!(graph.tag(), "graph.missing-provider");
+
+    let host = AppBuilder::new()
+        .plugin(HostRequirementPlugin::new(
+            "dev.example.host-consumer",
+            vec![HostRequirement::new(
+                capability_id("dev.kernox.host.runtime"),
+                VersionReq::parse("^1.0").unwrap(),
+            )],
+        ))
+        .resolve()
+        .err()
+        .expect("an unsatisfied host requirement must fail resolution");
+    assert!(matches!(host, AppResolveError::Host(_)));
+    assert_eq!(host.tag(), "host.missing-capability");
+}
+
+#[test]
+fn error_surfaces_are_stable_and_human_readable() {
+    let plugin_error = PluginError::new("consumer.start-failed", "the consumer could not start");
+    assert_eq!(plugin_error.tag(), "consumer.start-failed");
+    assert_eq!(plugin_error.message(), "the consumer could not start");
+    assert_eq!(plugin_error.to_string(), "the consumer could not start");
+
+    let failure = FailureRecord {
+        phase: LifecyclePhase::Stop,
+        plugin: plugin_id("dev.example.consumer"),
+        error_tag: "consumer.stop-failed",
+        message: "the consumer could not stop".to_owned(),
+    };
+    assert_eq!(
+        failure.to_string(),
+        "dev.example.consumer stop failed: the consumer could not stop"
+    );
+
+    assert!(ShutdownReport::default().is_clean());
+    let dirty = ShutdownReport { failures: vec![failure.clone()] };
+    assert!(!dirty.is_clean());
+    assert_eq!(dirty.failures, [failure]);
+}
+
+#[test]
+fn host_resolution_error_tags_are_stable() {
+    let capability = capability_id("dev.kernox.host.runtime");
+    let plugin = plugin_id("dev.example.host-consumer");
+    let requirement = VersionReq::parse("^1.0").unwrap();
+    let cases = [
+        (
+            HostResolutionError::DuplicateCapability { capability: capability.clone() },
+            "host.duplicate-capability",
+        ),
+        (
+            HostResolutionError::DuplicateRequirement {
+                plugin: plugin.clone(),
+                capability: capability.clone(),
+            },
+            "host.duplicate-requirement",
+        ),
+        (
+            HostResolutionError::Missing {
+                plugin: plugin.clone(),
+                capability: capability.clone(),
+                requirement: requirement.clone(),
+            },
+            "host.missing-capability",
+        ),
+        (
+            HostResolutionError::Incompatible {
+                plugin,
+                capability,
+                requirement,
+                available: vec![Version::new(2, 0, 0)],
+            },
+            "host.incompatible-capability",
+        ),
+    ];
+
+    for (error, expected) in cases {
+        assert_eq!(error.tag(), expected, "unstable tag for {error:?}");
+    }
+}
+
+#[test]
+fn lifecycle_phase_display_is_stable() {
+    let cases = [
+        (LifecyclePhase::Initialize, "initialize"),
+        (LifecyclePhase::Start, "start"),
+        (LifecyclePhase::Quiesce, "quiesce"),
+        (LifecyclePhase::Stop, "stop"),
+        (LifecyclePhase::Dispose, "dispose"),
+    ];
+
+    for (phase, expected) in cases {
+        assert_eq!(phase.to_string(), expected);
+    }
 }
 
 fn record(events: &Mutex<Vec<String>>, event: &str) {

@@ -1,0 +1,50 @@
+# Configuration for the extended workflow `mutation` job
+# (`cargo mutants -p kernox-core -p kernox-runtime --timeout 120`).
+#
+# The lane must exercise the feature matrix the crates actually ship, not only
+# `default = []`. kernox-core keeps its serde composition readers behind the
+# `serde` feature; without `--all-features` those mutants are built with the
+# feature disabled, so the mutated code is never compiled or tested and the
+# mutants are reported as surviving. Mutation testing is only meaningful
+# against the surface the crate ships.
+all_features = true
+
+# Narrow per-mutant exclusions. Every entry below is an equivalence argument
+# against the public contract, not a reduction of the tested surface: no file,
+# module, or function is excluded. Line/column anchors make an exclusion stop
+# matching (and the lane fail loudly) if the code moves.
+exclude_re = [
+  # `Plugin::host_requirements` defaults to `Vec::new()`; the mutant returns
+  # `vec![]`, which is the same empty vector. The two bodies are identical in
+  # behaviour for every caller, so no test can distinguish them.
+  '^crates/kernox-runtime/src/plugin\.rs:39:9: replace Plugin::host_requirements -> Vec<HostRequirement> with vec!\[\]$',
+
+  # `validate_conflicts` orders the two reported identities with `<`. Equality
+  # is unreachable: `PluginDescriptor::conflict_with` rejects self-conflicts,
+  # and one resolved graph cannot hold two plugins with the same identity, so
+  # the reported pair is always strictly ordered. The `<=` mutant therefore
+  # returns the same pair as the original for every reachable input.
+  '^crates/kernox-core/src/graph\.rs:624:61: replace < with <= in validate_conflicts$',
+
+  # `RunningApp::capability_from` rejects access when
+  # `terminal.is_some() || scope.is_closing()`. `terminal` is written only by
+  # `shutdown(&mut self)`, which finishes by closing the application scope, so
+  # whenever `terminal` is set the scope is also non-open. Before that, the
+  # scope is only made `Closing` by the same `&mut` shutdown borrow, which
+  # excludes a concurrent `&self` call. The `&&` mutant is equivalent on every
+  # state reachable through the public API.
+  '^crates/kernox-runtime/src/app\.rs:468:36: replace \|\| with && in RunningApp::capability_from$',
+
+  # Dropping an `InvocationScope` closes its private child scope. No public
+  # accessor can return that child or its state once the guard is consumed, the
+  # runtime exposes no scope nesting below an invocation, and the parent's
+  # private child registry is only used for cascading closure. Removing the
+  # `begin_close`/`finish_close` calls cannot change an observable outcome.
+  '^crates/kernox-runtime/src/app\.rs:543:9: replace <impl Drop for InvocationScope',
+
+  # `Scope::finish_close` prunes the finished child from its parent's private
+  # `children` registry. That registry only drives cascading closure, every
+  # child guard closes itself on drop, and a child cannot outlive the `&mut
+  # RunningApp` shutdown borrow. Inverting the retain is unobservable.
+  '^crates/kernox-runtime/src/scope\.rs:132:78: replace != with == in Scope::finish_close$',
+]
