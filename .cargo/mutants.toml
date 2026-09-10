@@ -1,0 +1,32 @@
+# Configuration for the extended workflow `mutation` job
+# (`cargo mutants -p kernox-core -p kernox-runtime --timeout 120`).
+#
+# The lane must exercise the feature matrix the crates actually ship, not only
+# `default = []`. kernox-core keeps its serde composition readers behind the
+# `serde` feature; without `--all-features` those mutants are built with the
+# feature disabled, so the mutated code is never compiled or tested and the
+# mutants are reported as surviving. Mutation testing is only meaningful
+# against the surface the crate ships.
+all_features = true
+
+# Narrow per-mutant exclusions. Each entry must be equivalent for *every* state
+# reachable through the public API, not merely hard to observe. No file, module,
+# or function is excluded, and the tested surface is not reduced. Line/column
+# anchors make an exclusion stop matching (and the lane fail loudly) if the
+# code moves.
+exclude_re = [
+  # `Plugin::host_requirements` defaults to `Vec::new()`; the mutant returns
+  # `vec![]`, which constructs the same empty vector. Both bodies return an
+  # empty `Vec` with no capacity difference, so every caller - public or
+  # internal - receives an equal value.
+  '^crates/kernox-runtime/src/plugin\.rs:39:9: replace Plugin::host_requirements -> Vec<HostRequirement> with vec!\[\]$',
+
+  # `validate_conflicts` orders the two reported identities with `<`. Equality
+  # is unreachable from every public constructor: `PluginDescriptor::conflict_with`
+  # rejects self-conflicts, deserialization routes conflict lists through that
+  # same constructor, descriptors are not otherwise mutable, and a resolved
+  # graph cannot hold two plugins with the same identity. `validate_conflicts`
+  # only sees descriptors from a resolved graph, so the two identities it
+  # compares are always distinct and `<=` returns the same pair as `<`.
+  '^crates/kernox-core/src/graph\.rs:624:61: replace < with <= in validate_conflicts$',
+]

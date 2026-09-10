@@ -1390,6 +1390,332 @@ mod tests {
         assert_eq!(accepted.limits.max_plugins, 1);
     }
 
+    fn two_plugin_report() -> GraphReport {
+        let clock = capability("dev.example.clock");
+        let provider = PluginDescriptor::new(plugin("dev.example.clock"), version())
+            .provide(CapabilityOffer::new(clock.clone(), version()))
+            .unwrap();
+        let consumer = PluginDescriptor::new(plugin("dev.example.orders"), version())
+            .require(CapabilityRequirement::exactly_one(clock, requirement()))
+            .unwrap();
+
+        GraphBuilder::new().plugin(consumer).plugin(provider).resolve().unwrap().report()
+    }
+
+    #[test]
+    fn graph_diagnostic_tags_are_stable() {
+        let clock = plugin("dev.example.clock");
+        let capability = capability("dev.example.clock");
+
+        assert_eq!(
+            GraphDiagnostic::OptionalProviderMissing {
+                consumer: clock.clone(),
+                capability: capability.clone(),
+            }
+            .tag(),
+            "graph.optional-provider-missing"
+        );
+        assert_eq!(
+            GraphDiagnostic::UnselectedOffer { provider: clock, capability }.tag(),
+            "graph.unselected-offer"
+        );
+    }
+
+    #[test]
+    fn resolved_graph_exposes_descriptors_requirements_and_edges() {
+        let clock = capability("dev.example.clock");
+        let provider = PluginDescriptor::new(plugin("dev.example.provider"), Version::new(1, 2, 0))
+            .provide(CapabilityOffer::new(clock.clone(), Version::new(1, 2, 0)))
+            .unwrap();
+        let consumer = PluginDescriptor::new(plugin("dev.example.consumer"), version())
+            .require(CapabilityRequirement::exactly_one(clock.clone(), requirement()))
+            .unwrap();
+
+        let graph = GraphBuilder::new().plugin(consumer).plugin(provider).resolve().unwrap();
+
+        let descriptor =
+            graph.plugin(&plugin("dev.example.provider")).expect("provider descriptor is exposed");
+        assert_eq!(descriptor.version(), &Version::new(1, 2, 0));
+        assert_eq!(descriptor.provides().len(), 1);
+        assert!(graph.plugin(&plugin("dev.example.unknown")).is_none());
+
+        assert_eq!(
+            graph.edges(),
+            [ResolvedEdge {
+                provider: plugin("dev.example.provider"),
+                consumer: plugin("dev.example.consumer"),
+                capability: clock,
+            }]
+        );
+        assert_eq!(graph.requirements().len(), 1);
+    }
+
+    #[test]
+    fn capability_declaration_count_may_equal_but_not_exceed_the_configured_limit() {
+        let provider = PluginDescriptor::new(plugin("dev.example.provider"), version())
+            .provide(CapabilityOffer::new(capability("dev.example.clock"), version()))
+            .unwrap();
+        let limits = GraphLimits { max_capabilities_per_plugin: 1, ..GraphLimits::default() };
+
+        let graph =
+            GraphBuilder::new().with_limits(limits).plugin(provider.clone()).resolve().unwrap();
+        assert_eq!(graph.plugins().len(), 1);
+
+        let expanded = provider
+            .provide(CapabilityOffer::new(capability("dev.example.extra"), version()))
+            .unwrap();
+        assert_eq!(
+            GraphBuilder::new().with_limits(limits).plugin(expanded).resolve().unwrap_err(),
+            ResolveError::CapabilityLimitExceeded {
+                plugin: plugin("dev.example.provider"),
+                actual: 2,
+                maximum: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn resolved_edge_count_may_equal_but_not_exceed_the_configured_limit() {
+        let first = capability("dev.example.first");
+        let second = capability("dev.example.second");
+        let provider = PluginDescriptor::new(plugin("dev.example.provider"), version())
+            .provide(CapabilityOffer::new(first.clone(), version()))
+            .unwrap()
+            .provide(CapabilityOffer::new(second.clone(), version()))
+            .unwrap();
+        let consumer = PluginDescriptor::new(plugin("dev.example.consumer"), version())
+            .require(CapabilityRequirement::exactly_one(first, requirement()))
+            .unwrap()
+            .require(CapabilityRequirement::exactly_one(second, requirement()))
+            .unwrap();
+
+        let graph = GraphBuilder::new()
+            .with_limits(GraphLimits { max_edges: 2, ..GraphLimits::default() })
+            .plugin(provider.clone())
+            .plugin(consumer.clone())
+            .resolve()
+            .unwrap();
+        assert_eq!(graph.edges().len(), 2);
+
+        assert_eq!(
+            GraphBuilder::new()
+                .with_limits(GraphLimits { max_edges: 1, ..GraphLimits::default() })
+                .plugin(provider)
+                .plugin(consumer)
+                .resolve()
+                .unwrap_err(),
+            ResolveError::EdgeLimitExceeded { actual: 2, maximum: 1 }
+        );
+    }
+
+    #[test]
+    fn configured_limits_at_the_absolute_maximum_are_accepted() {
+        let limits = GraphLimits {
+            max_plugins: ABSOLUTE_MAX_PLUGINS,
+            max_capabilities_per_plugin: ABSOLUTE_MAX_CAPABILITIES_PER_PLUGIN,
+            max_edges: ABSOLUTE_MAX_EDGES,
+        };
+
+        let graph = GraphBuilder::new().with_limits(limits).resolve().unwrap();
+        assert_eq!(graph.plugins().len(), 0);
+    }
+
+    #[test]
+    fn optional_requirement_with_a_provider_emits_no_missing_provider_diagnostic() {
+        let clock = capability("dev.example.clock");
+        let provider = PluginDescriptor::new(plugin("dev.example.provider"), version())
+            .provide(CapabilityOffer::new(clock.clone(), version()))
+            .unwrap();
+        let consumer = PluginDescriptor::new(plugin("dev.example.consumer"), version())
+            .require(CapabilityRequirement::new(
+                clock,
+                requirement(),
+                RequirementCardinality::ZeroOrOne,
+            ))
+            .unwrap();
+
+        let graph = GraphBuilder::new().plugin(provider).plugin(consumer).resolve().unwrap();
+        let diagnostics = graph.diagnostics().to_vec();
+        assert!(diagnostics.is_empty(), "unexpected diagnostics: {diagnostics:?}");
+    }
+
+    #[test]
+    fn accepts_consistent_graph_reports_with_relations() {
+        let report = two_plugin_report();
+        assert!(!report.requirements.is_empty());
+        assert!(!report.edges.is_empty());
+
+        let accepted = report.clone().accept().expect("consistent report must be accepted");
+        assert_eq!(accepted, report);
+    }
+
+    #[test]
+    fn report_rejects_startup_order_that_omits_a_known_plugin() {
+        let mut report = two_plugin_report();
+        let declared = report.plugins[0].id.clone();
+        report.startup_order = vec![declared.clone()];
+        report.teardown_order = vec![declared];
+
+        assert_eq!(
+            report.accept().unwrap_err(),
+            ResolveError::UnknownReportPlugin { plugin: plugin("dev.example.orders") }
+        );
+    }
+
+    #[test]
+    fn plugin_conflicts_report_stable_identity_order() {
+        let first = plugin("dev.example.alpha");
+        let second = plugin("dev.example.beta");
+        let declared_first =
+            PluginDescriptor::new(first.clone(), version()).conflict_with(second.clone()).unwrap();
+        let declared_second =
+            PluginDescriptor::new(second.clone(), version()).conflict_with(first.clone()).unwrap();
+
+        let error = GraphBuilder::new()
+            .plugin(declared_second)
+            .plugin(declared_first)
+            .resolve()
+            .unwrap_err();
+        assert_eq!(error, ResolveError::PluginConflict { plugin: first, conflict: second });
+        assert_eq!(error.tag(), "graph.plugin-conflict");
+    }
+
+    #[test]
+    fn one_or_more_requires_a_compatible_provider() {
+        let clock = capability("dev.example.clock");
+        let consumer = || {
+            PluginDescriptor::new(plugin("dev.example.consumer"), version())
+                .require(CapabilityRequirement::new(
+                    clock.clone(),
+                    requirement(),
+                    RequirementCardinality::OneOrMore,
+                ))
+                .unwrap()
+        };
+
+        assert_eq!(
+            GraphBuilder::new().plugin(consumer()).resolve().unwrap_err(),
+            ResolveError::MissingProvider {
+                consumer: plugin("dev.example.consumer"),
+                capability: clock.clone(),
+                requirement: requirement(),
+            }
+        );
+
+        let incompatible = PluginDescriptor::new(plugin("dev.example.provider"), version())
+            .provide(CapabilityOffer::new(clock.clone(), Version::new(2, 0, 0)))
+            .unwrap();
+        assert_eq!(
+            GraphBuilder::new().plugin(consumer()).plugin(incompatible).resolve().unwrap_err(),
+            ResolveError::IncompatibleProvider {
+                consumer: plugin("dev.example.consumer"),
+                capability: clock,
+                requirement: requirement(),
+                available: vec![(plugin("dev.example.provider"), Version::new(2, 0, 0))],
+            }
+        );
+    }
+
+    #[test]
+    fn cycle_reporting_prefers_the_smallest_unresolved_cycle() {
+        let link = capability("dev.example.link");
+        let d_cap = capability("dev.example.d-cap");
+        let e_cap = capability("dev.example.e-cap");
+        let b_cap = capability("dev.example.b-cap");
+        let c_cap = capability("dev.example.c-cap");
+
+        let root = PluginDescriptor::new(plugin("dev.example.aa"), version())
+            .provide(CapabilityOffer::new(link.clone(), version()))
+            .unwrap();
+        let later_provider = PluginDescriptor::new(plugin("dev.example.dd"), version())
+            .provide(CapabilityOffer::new(d_cap.clone(), version()))
+            .unwrap()
+            .require(CapabilityRequirement::exactly_one(e_cap.clone(), requirement()))
+            .unwrap()
+            .require(CapabilityRequirement::exactly_one(link, requirement()))
+            .unwrap();
+        let later_consumer = PluginDescriptor::new(plugin("dev.example.ee"), version())
+            .provide(CapabilityOffer::new(e_cap, version()))
+            .unwrap()
+            .require(CapabilityRequirement::exactly_one(d_cap, requirement()))
+            .unwrap();
+        let earlier_provider = PluginDescriptor::new(plugin("dev.example.bb"), version())
+            .provide(CapabilityOffer::new(b_cap.clone(), version()))
+            .unwrap()
+            .require(CapabilityRequirement::exactly_one(c_cap.clone(), requirement()))
+            .unwrap();
+        let earlier_consumer = PluginDescriptor::new(plugin("dev.example.cc"), version())
+            .provide(CapabilityOffer::new(c_cap, version()))
+            .unwrap()
+            .require(CapabilityRequirement::exactly_one(b_cap, requirement()))
+            .unwrap();
+
+        let error = GraphBuilder::new()
+            .plugin(root)
+            .plugin(later_provider)
+            .plugin(later_consumer)
+            .plugin(earlier_provider)
+            .plugin(earlier_consumer)
+            .resolve()
+            .unwrap_err();
+        let ResolveError::DependencyCycle { cycle } = error else {
+            panic!("expected dependency cycle");
+        };
+        assert_eq!(
+            cycle,
+            [plugin("dev.example.bb"), plugin("dev.example.cc"), plugin("dev.example.bb")]
+        );
+    }
+
+    #[test]
+    fn cycle_detection_terminates_and_reports_the_single_cycle() {
+        let leaf_cap = capability("dev.example.leaf");
+        let p_cap = capability("dev.example.p-cap");
+        let q_cap = capability("dev.example.q-cap");
+
+        let provider = PluginDescriptor::new(plugin("dev.example.pp"), version())
+            .provide(CapabilityOffer::new(leaf_cap.clone(), version()))
+            .unwrap()
+            .provide(CapabilityOffer::new(q_cap.clone(), version()))
+            .unwrap()
+            .require(CapabilityRequirement::exactly_one(p_cap.clone(), requirement()))
+            .unwrap();
+        let relay = PluginDescriptor::new(plugin("dev.example.qq"), version())
+            .provide(CapabilityOffer::new(p_cap, version()))
+            .unwrap()
+            .require(CapabilityRequirement::exactly_one(q_cap, requirement()))
+            .unwrap();
+        let leaf = PluginDescriptor::new(plugin("dev.example.aa"), version())
+            .require(CapabilityRequirement::exactly_one(leaf_cap, requirement()))
+            .unwrap();
+
+        // A cycle with a dead-end sibling forces the walker to backtrack. The
+        // timeout turns a non-terminating walk into a test failure instead of
+        // a hung mutation-test run.
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let error = GraphBuilder::new()
+                .plugin(provider)
+                .plugin(relay)
+                .plugin(leaf)
+                .resolve()
+                .expect_err("cyclic graph must fail resolution");
+            let ResolveError::DependencyCycle { cycle } = error else {
+                panic!("expected dependency cycle");
+            };
+            sender.send(cycle).unwrap();
+        });
+
+        let cycle = receiver
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("cycle detection must terminate");
+        handle.join().unwrap();
+        assert_eq!(
+            cycle,
+            [plugin("dev.example.pp"), plugin("dev.example.qq"), plugin("dev.example.pp")]
+        );
+    }
+
     proptest! {
         #[test]
         fn independent_plugin_order_is_insertion_invariant(values in prop::collection::btree_set(0_u16..500, 1..64)) {

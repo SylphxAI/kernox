@@ -442,6 +442,23 @@ mod tests {
             "descriptor.invalid-source"
         );
     }
+
+    #[test]
+    fn source_fields_accept_the_length_boundary_and_reject_one_more() {
+        let source = PluginSource::new(
+            "p".repeat(MAX_SOURCE_PACKAGE_LENGTH),
+            Some("r".repeat(MAX_SOURCE_REPOSITORY_LENGTH)),
+        )
+        .unwrap();
+        assert_eq!(source.package().len(), MAX_SOURCE_PACKAGE_LENGTH);
+        assert_eq!(source.repository().unwrap().len(), MAX_SOURCE_REPOSITORY_LENGTH);
+
+        assert!(PluginSource::new("p".repeat(MAX_SOURCE_PACKAGE_LENGTH + 1), None).is_err());
+        assert!(
+            PluginSource::new("package", Some("r".repeat(MAX_SOURCE_REPOSITORY_LENGTH + 1)),)
+                .is_err()
+        );
+    }
 }
 
 #[cfg(all(test, feature = "serde"))]
@@ -504,5 +521,51 @@ mod serde_tests {
         assert!(serde_json::from_str::<PluginDescriptor>(input).is_err());
         let accepted: PluginDescriptor = serde_json::from_str(VALID_DESCRIPTOR).unwrap();
         assert_eq!(accepted.provides().len(), 1);
+    }
+
+    #[test]
+    fn descriptor_serialization_matches_the_wire_contract() {
+        let descriptor = PluginDescriptor::new(
+            PluginId::new("dev.example.plugin").unwrap(),
+            Version::new(1, 2, 3),
+        )
+        .sourced_from(
+            PluginSource::new("example-pkg", Some("https://example.com/repo".to_owned())).unwrap(),
+        )
+        .provide(CapabilityOffer::new(
+            CapabilityId::new("dev.example.clock").unwrap(),
+            Version::new(2, 0, 0),
+        ))
+        .unwrap()
+        .require(CapabilityRequirement::exactly_one(
+            CapabilityId::new("dev.example.store").unwrap(),
+            VersionReq::parse("^3.0").unwrap(),
+        ))
+        .unwrap()
+        .conflict_with(PluginId::new("dev.example.rival").unwrap())
+        .unwrap();
+
+        let value = serde_json::to_value(&descriptor).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "id": "dev.example.plugin",
+                "version": "1.2.3",
+                "source": {
+                    "package": "example-pkg",
+                    "repository": "https://example.com/repo"
+                },
+                "provides": [{"id": "dev.example.clock", "version": "2.0.0"}],
+                "requires": [{
+                    "id": "dev.example.store",
+                    "version": "^3.0",
+                    "cardinality": "ExactlyOne"
+                }],
+                "conflicts": ["dev.example.rival"]
+            })
+        );
+
+        let decoded: PluginDescriptor = serde_json::from_value(value).unwrap();
+        assert_eq!(decoded, descriptor);
     }
 }

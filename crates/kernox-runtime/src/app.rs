@@ -620,3 +620,32 @@ fn safe_tag(tag: &'static str) -> &'static str {
         && tag.as_bytes().last().is_some_and(u8::is_ascii_lowercase);
     if valid { tag } else { "plugin.invalid-error-tag" }
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use futures::executor::block_on;
+
+    use crate::{AppBuilder, ScopeState};
+
+    #[test]
+    fn closed_invocation_scopes_are_pruned_from_the_application_registry() {
+        block_on(async {
+            let mut app = AppBuilder::new().resolve().unwrap().start().await.unwrap();
+
+            for _ in 0..10_000 {
+                app.invocation_scope().unwrap().close();
+            }
+            assert_eq!(app.scope.child_count(), 0, "closed invocation scopes must be pruned");
+
+            let invocation = app.invocation_scope().unwrap();
+            assert_eq!(app.scope.child_count(), 1);
+            assert_eq!(invocation.view().state(), ScopeState::Open);
+            invocation.close();
+            assert_eq!(app.scope.child_count(), 0);
+
+            assert!(app.shutdown().await.is_clean());
+        });
+    }
+}
