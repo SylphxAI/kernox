@@ -32,13 +32,17 @@ fn main() -> ExitCode {
         }
         Some("bench-budget") => {
             let arguments = arguments.collect::<Vec<_>>();
-            bench_budget::parse_criterion_dir(&arguments)
-                .and_then(bench_budget::resolve_criterion_dir)
-                .and_then(|criterion_dir| bench_budget::run(&criterion_dir))
+            bench_budget::parse_gate_arguments(&arguments)
+                .and_then(|options| bench_budget::run(&options))
+        }
+        Some("bench-budget-record") => {
+            let arguments = arguments.collect::<Vec<_>>();
+            bench_budget::parse_record_arguments(&arguments)
+                .and_then(|options| bench_budget::run_record(&options))
         }
         _ => {
             eprintln!(
-                "usage: cargo run -p xtask -- verify\n       cargo run -p xtask -- release-check [--version VERSION]\n       cargo run -p xtask -- bench-budget [--criterion-dir DIR]"
+                "usage: cargo run -p xtask -- verify\n       cargo run -p xtask -- release-check [--version VERSION]\n       cargo run -p xtask -- bench-budget [--criterion-dir DIR] [--runs COUNT] --not-before EPOCH_SECONDS\n       cargo run -p xtask -- bench-budget-record [--criterion-dir DIR] [--runs COUNT]"
             );
             return ExitCode::from(2);
         }

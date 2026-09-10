@@ -7,70 +7,85 @@ shape must be re-measured.
 
 ## Steady-state budget gate — 2026-09-10
 
-The steady-state comparison is enforced as a fail-closed gate, not recorded as
-a single observation. `cargo run --locked -p xtask -- bench-budget
-[--criterion-dir DIR]` reads the Criterion 0.8.2 machine-readable estimates from
-the default directory `<cargo target directory>/criterion`, where the target
-directory is resolved with `cargo metadata --locked --format-version 1
---no-deps` (`target_directory`) so a configured `CARGO_TARGET_DIR` or other
-target-directory configuration is honored; `--criterion-dir DIR` overrides the
-default:
+The steady-state comparison is enforced as a fail-closed gate over repeated
+recorded runs, not as a single observation. The scheduled extended lane keeps
+its full `cargo bench --locked -p kernox --bench kernel` distributions run and
+raw `benchmark.txt` artifact, then additionally records five fresh steady-state
+invocations and gates on them:
 
-- `steady-state-call/direct-arc-dyn-trait/new/estimates.json`
-- `steady-state-call/kernox-extracted-arc-dyn-trait/new/estimates.json`
+1. `cargo run --locked -p xtask -- bench-budget-record --runs 5` resolves the
+   Cargo target directory (`cargo metadata --locked --format-version 1
+   --no-deps`, `target_directory`, so a configured `CARGO_TARGET_DIR` is
+   honored), deletes `<target_directory>/criterion/steady-state-call` so no
+   earlier recording can survive, and runs
+   `cargo bench --locked -p kernox --bench kernel -- steady-state-call --save-baseline run1..run5`.
+2. `cargo run --locked -p xtask -- bench-budget --not-before <start>` reads
+   `<target_directory>/criterion/steady-state-call/<benchmark>/run<i>/estimates.json`
+   for `i = 1..5` on both benchmarks (all ten files are required).
 
-The gate uses only `mean.point_estimate` and
-`mean.confidence_interval.lower_bound` / `mean.confidence_interval.upper_bound`
-(nanoseconds), computes
+Both steps run after the evidence upload, so a failing gate still retains
+`benchmark.txt`.
+
+Enforced rule (per-side minimum: loading can only add time, so the fastest
+observed run estimates each side's clean execution, and a genuine regression
+raises every Kernox run):
 
 ```text
-delta = (kernox_point - direct_point) / direct_point
+direct_min = min(direct_point_1..direct_point_5)
+kernox_min = min(kernox_point_1..kernox_point_5)
+delta = (kernox_min - direct_min) / direct_min
+PASS iff delta <= 0.02      # exactly 2% passes
+FAIL iff delta > 0.02       # non-zero exit
 ```
 
-and passes when `delta <= 0.02`. Exactly 2% passes because the claim is "no
-greater than 2%"; any delta above 2% fails with a non-zero exit. The two
-`mean.confidence_interval` ranges are also compared as closed intervals and
-reported as overlapping or not; overlap is informational and never waives the
-point-estimate budget. Missing estimate files, an absent benchmark, unparsable
-JSON, and missing, non-numeric, non-finite, non-positive, or out-of-order
-fields fail closed with a message naming the path and field. Every run prints
-`bench-budget.direct=<ns>`, `bench-budget.kernox=<ns>`,
-`bench-budget.direct.interval=[lo, hi]`, `bench-budget.kernox.interval=[lo, hi]`,
-`bench-budget.delta=<fraction>`, `bench-budget.overlap=true|false`, and
-`bench-budget.result=pass|fail`. The console `time:` line Criterion prints is
-its slope estimate; the gate deliberately reads `mean`.
+The gate prints every per-run point estimate, interval, and delta, plus
+`bench-budget.direct.min`, `bench-budget.kernox.min`, `bench-budget.delta`
+(the enforced statistic), `bench-budget.delta.median`, `.min`, `.max`,
+`.spread` (the per-run delta spread), `bench-budget.overlap`, and
+`bench-budget.result=pass|fail`. It reads only `mean.point_estimate` and
+`mean.confidence_interval.lower_bound` / `upper_bound` in ns; the console
+`time:` line Criterion prints is its slope estimate. Interval overlap
+(closed-interval intersection of the observed ranges) is informational and
+never waives the point-estimate budget.
 
-The scheduled extended lane runs `cargo bench --locked -p kernox --bench kernel`
-and then this gate in the same job, after the raw benchmark text has been
-uploaded as the `kernox-benchmark-<sha>` artifact, so a failing gate still
-retains the raw output.
+Same-run binding. Every file must have been modified at or after the
+invocation start passed as `--not-before`, and the modification times must form
+the strict interleaved chain `direct1 < kernox1 < direct2 < kernox2 < ...
+< direct5 < kernox5` produced by the five sequential invocations. A stale tree
+from an earlier invocation, a fresh direct side paired with a stale Kernox side
+(or vice versa), or a reordered recording fails closed instead of being
+averaged in.
+
+Fail-closed (non-zero exit, message naming the path and field): missing run or
+estimate file, unparsable JSON, missing/non-numeric/non-finite field,
+non-positive point estimate or interval bound, `lower_bound > upper_bound`,
+stale or out-of-order recordings, and fewer than three recorded runs.
 
 Local gate measurement (2026-09-10, Linux 6.18.18 x86_64, AMD EPYC 9454,
-rustc 1.97.1, optimized bench profile, host shared with concurrent builds; no
-environment override and no `--criterion-dir`, so the gate resolved the host's
-configured `CARGO_TARGET_DIR` itself and reported
-`bench-budget.criterion-dir=/scratch/cargo-target/kernox-benchmark-budget--5fbf89dacdad11c0/criterion`):
+rustc 1.97.1, optimized bench profile, host shared with concurrent builds):
 
 ```text
-cargo bench --locked -p kernox --bench kernel -- steady-state-call
-cargo run --locked -p xtask -- bench-budget
+start=$(date -u +%s)
+cargo run --locked -p xtask -- bench-budget-record --runs 5
+cargo run --locked -p xtask -- bench-budget --not-before "$start"
 ```
 
-| Quantity | Value |
-| --- | ---: |
-| Direct `Arc<dyn Trait>` mean | 1.447385 ns, CI [1.432111, 1.463806] |
-| Kernox-extracted mean | 1.363880 ns, CI [1.355462, 1.373399] |
-| Delta (point estimates) | −0.057694 |
-| Intervals overlap | false |
-| Result | pass |
+| Run | Direct mean (ns) | Kernox mean (ns) | Delta |
+| --- | ---: | ---: | ---: |
+| 1 | 2.147497 | 1.386574 | −0.354330 |
+| 2 | 1.480936 | 1.682971 | +0.136424 |
+| 3 | 1.631315 | 1.404281 | −0.139172 |
+| 4 | 1.404451 | 1.654398 | +0.177968 |
+| 5 | 1.409471 | 1.481286 | +0.050952 |
+| Per-side minimum | 1.404451 | 1.386574 | **−0.012728 (pass)** |
 
-The negative delta is run noise on a shared host (the capability audit measured
-roughly a ±2–4% spread for this same comparison), not an acceleration claim:
-both paths are the same direct dynamic trait call after boot. The retained
-extended-lane measurement artifact
+The five per-run deltas spanned 0.532298 (median +0.050952) on this loaded
+shared host: a single run cannot decide this budget, and none of these runs is
+an acceleration claim. The observed lane spread from the dispatched extended
+run is recorded below. The retained extended-lane measurement artifact
 `kernox-benchmark-9a9d3f9037756cbb0345578a9b21a9f55c5aa31b` from schedule run
 34080224078 predates this gate; the claim-honesty change records its detailed
-numbers. This gate applies the same rule to every scheduled run going forward.
+numbers.
 
 ## Baseline — 2026-08-15
 
