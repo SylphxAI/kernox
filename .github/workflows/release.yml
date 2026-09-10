@@ -293,18 +293,17 @@ jobs:
               head -c 2000 "${listing}" >&2
               exit 1
             fi
-            case "$(has_config "${listing}"; echo $?)" in
-              0)
-                echo "${package}: trusted publisher already registered"
-                continue
-                ;;
-              1) ;;
-              *)
-                echo "the trusted publishing listing for ${package} is not a readable config list; refusing to create on top of it" >&2
-                head -c 2000 "${listing}" >&2
-                exit 1
-                ;;
-            esac
+            config_state=0
+            has_config "${listing}" || config_state=$?
+            if [ "${config_state}" -eq 0 ]; then
+              echo "${package}: trusted publisher already registered"
+              continue
+            fi
+            if [ "${config_state}" -ne 1 ]; then
+              echo "the trusted publishing listing for ${package} is not a readable config list; refusing to create on top of it" >&2
+              head -c 2000 "${listing}" >&2
+              exit 1
+            fi
             creation="$(mktemp)"
             # The create call is not idempotent, so it is never retried.
             code="$(curl --silent --show-error --user-agent "${user_agent}" \
@@ -359,11 +358,6 @@ jobs:
     needs: [crates-io]
     runs-on: sylphx-linux-standard
     timeout-minutes: 45
-    # Package into a private target directory so the rebuild proof can never
-    # read a leftover artifact from another step or job; the per-attempt name
-    # keeps a persisted self-hosted workspace from seeding it either.
-    env:
-      CARGO_TARGET_DIR: ${{ runner.temp }}/kernox-yank-target-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Check out release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -376,6 +370,11 @@ jobs:
       - name: Prove the dest readback then yank the bootstrap
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          # Package into a private target directory so the rebuild proof can
+          # never read a leftover artifact from another step or job; the
+          # per-attempt name keeps a persisted self-hosted workspace from
+          # seeding it either. `runner` is only available at step scope.
+          CARGO_TARGET_DIR: ${{ runner.temp }}/kernox-yank-target-${{ github.run_id }}-${{ github.run_attempt }}
         shell: bash
         run: |
           set -euo pipefail
@@ -450,6 +449,9 @@ jobs:
             if [ "${code}" != "404" ]; then
               break
             fi
+            if [ "${attempt}" -ge 12 ]; then
+              break
+            fi
             echo "the crate index does not serve ${package} ${version} yet (attempt ${attempt}); retrying" >&2
             sleep 10
           done
@@ -495,7 +497,7 @@ jobs:
               echo "${package} ${version} was not built from the clean tag ${tag} (${tag_revision})" >&2
               exit 1
             fi
-            target_root="${CARGO_TARGET_DIR:-target}"
+            target_root="${CARGO_TARGET_DIR:?the rebuild target directory must be set for this job}"
             local_artifact="${target_root}/package/${package}-${version}.crate"
             if [ ! -s "${local_artifact}" ]; then
               local_artifact="$(find "${target_root}" -maxdepth 3 -type f -name "${package}-${version}.crate" -not -path '*tmp-crate*' -print -quit)"

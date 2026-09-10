@@ -1,0 +1,10 @@
+# Labels of the approved Sylphx Platform self-hosted profiles. The runner
+# authority contract in docs/specs/20260816-ci-runner-authority.md owns which
+# labels may be used; this file only tells actionlint that they are runner
+# labels instead of typos.
+self-hosted-runner:
+  labels:
+    - sylphx-linux-standard
+    - sylphx
+    - macos
+    - standard
