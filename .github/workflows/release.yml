@@ -3,6 +3,10 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # Maintenance entry point for the two non-publish jobs below. The publish
+  # job stays gated on a `v*` tag push through its own `if`, so a dispatch can
+  # never publish and there is still exactly one publish path.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -11,6 +15,8 @@ permissions:
 
 jobs:
   crates-io:
+    name: publish dest 0.1.x
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: sylphx-linux-standard
     timeout-minutes: 45
     environment: crates-io
@@ -209,3 +215,215 @@ jobs:
           for package in "${packages[@]}"; do
             publish_and_wait "${package}"
           done
+
+  register-publisher:
+    name: register crates.io trusted publisher
+    # Maintenance action, never a publish path. It creates the GitHub trusted
+    # publisher configs that bind this repository, this workflow file, and the
+    # `crates-io` environment to the seven release crates, and it reads the
+    # created configs back. crates.io only admits this call with a registry API
+    # token carrying the `trusted-publishing` scope; any other token fails
+    # closed with HTTP 403 and no config is created.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: sylphx-linux-standard
+    timeout-minutes: 20
+    steps:
+      - name: Check out default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Ensure every release crate has the expected trusted publisher
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "CARGO_REGISTRY_TOKEN is empty; it must carry the crates.io trusted-publishing scope" >&2
+            exit 1
+          fi
+          user_agent='kernox-ci/1.0 (+https://github.com/SylphxAI/kernox)'
+          packages=(
+            kernox-core
+            kernox-runtime
+            kernox-host-serverless
+            kernox-host-tokio
+            kernox-testkit
+            kernox
+            cargo-kernox
+          )
+          list_configs() {
+            local package="$1" output="$2"
+            curl --retry 3 --silent --show-error --user-agent "${user_agent}" \
+              --header "Authorization: Bearer ${CARGO_REGISTRY_TOKEN}" \
+              --output "${output}" --write-out '%{http_code}' \
+              "https://crates.io/api/v1/trusted_publishing/github_configs?crate=${package}"
+          }
+          has_config() {
+            local output="$1"
+            jq -e '
+              [
+                .github_configs[]? | select(
+                  (.repository_owner | ascii_downcase) == "sylphxai"
+                  and (.repository_name | ascii_downcase) == "kernox"
+                  and .workflow_filename == "release.yml"
+                  and .environment == "crates-io"
+                )
+              ] | length > 0
+            ' "${output}" >/dev/null
+          }
+          for package in "${packages[@]}"; do
+            listing="$(mktemp)"
+            code="$(list_configs "${package}" "${listing}")"
+            if [ "${code}" != "200" ]; then
+              echo "listing trusted publishing configs for ${package} failed: HTTP ${code}" >&2
+              head -c 2000 "${listing}" >&2
+              exit 1
+            fi
+            if has_config "${listing}"; then
+              echo "${package}: trusted publisher already registered"
+              continue
+            fi
+            creation="$(mktemp)"
+            code="$(curl --retry 3 --silent --show-error --user-agent "${user_agent}" \
+              --header "Authorization: Bearer ${CARGO_REGISTRY_TOKEN}" \
+              --header "Content-Type: application/json" \
+              --data "$(jq -cn --arg package "${package}" '{
+                github_config: {
+                  crate: $package,
+                  repository_owner: "SylphxAI",
+                  repository_name: "kernox",
+                  workflow_filename: "release.yml",
+                  environment: "crates-io"
+                }
+              }')" \
+              --output "${creation}" --write-out '%{http_code}' \
+              https://crates.io/api/v1/trusted_publishing/github_configs)"
+            if [ "${code}" != "200" ] && [ "${code}" != "201" ]; then
+              echo "creating the trusted publisher for ${package} failed: HTTP ${code}" >&2
+              head -c 2000 "${creation}" >&2
+              exit 1
+            fi
+            code="$(list_configs "${package}" "${listing}")"
+            if [ "${code}" != "200" ] || ! has_config "${listing}"; then
+              echo "${package}: the trusted publisher was not readable after creation" >&2
+              exit 1
+            fi
+            echo "${package}: trusted publisher registered for SylphxAI/kernox release.yml [crates-io]"
+          done
+
+  yank-bootstrap:
+    name: yank 0.0.1 bootstrap
+    # Dest requires the `0.0.1` crate-name-existence bootstrap to be yanked
+    # only after the dest `0.1.x` registry readback holds, so this job proves
+    # that readback itself instead of trusting the publish job's exit status:
+    # the registry must serve the release tag's version for all seven crates,
+    # the bytes served by the registry must hash to the registry checksum, and
+    # their recorded source revision must be the tag's commit on `main`. Only
+    # then does the bootstrap get yanked, with a readback that it is yanked.
+    if: >-
+      always() && (github.event_name == 'workflow_dispatch'
+      || (startsWith(github.ref, 'refs/tags/v0.1.') && needs.crates-io.result == 'success'))
+    needs: [crates-io]
+    runs-on: sylphx-linux-standard
+    timeout-minutes: 30
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.97.1
+      - name: Prove the dest readback then yank the bootstrap
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          user_agent='kernox-ci/1.0 (+https://github.com/SylphxAI/kernox)'
+          packages=(
+            kernox-core
+            kernox-runtime
+            kernox-host-serverless
+            kernox-host-tokio
+            kernox-testkit
+            kernox
+            cargo-kernox
+          )
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(cargo metadata --no-deps --format-version 1 | jq -er \
+              '.packages[] | select(.name == "kernox") | .version')"
+          fi
+          case "${version}" in
+            0.1.*) ;;
+            *)
+              echo "refusing to yank the 0.0.1 bootstrap outside the dest 0.1.x train: ${version}" >&2
+              exit 1
+              ;;
+          esac
+          tag="v${version}"
+          git fetch --force --no-tags origin "refs/tags/${tag}:refs/tags/${tag}"
+          tag_revision="$(git rev-parse "refs/tags/${tag}^{commit}")"
+          git merge-base --is-ancestor "${tag_revision}" origin/main
+          registry_json() {
+            local package="$1" release_version="$2" output="$3"
+            curl --retry 3 --silent --show-error --user-agent "${user_agent}" \
+              --output "${output}" --write-out '%{http_code}' \
+              "https://crates.io/api/v1/crates/${package}/${release_version}"
+          }
+          for package in "${packages[@]}"; do
+            metadata="$(mktemp)"
+            code="$(registry_json "${package}" "${version}" "${metadata}")"
+            if [ "${code}" != "200" ]; then
+              echo "the registry does not serve ${package} ${version}; refusing to yank the bootstrap" >&2
+              exit 1
+            fi
+            checksum="$(jq -er --arg package "${package}" --arg version "${version}" '
+              if .version.crate != $package or .version.num != $version or .version.yanked then
+                error("registry version identity is not the requested package")
+              else
+                .version.checksum
+              end
+            ' "${metadata}")"
+            artifact="$(mktemp)"
+            curl --retry 5 --silent --show-error --location --user-agent "${user_agent}" \
+              --output "${artifact}" \
+              "https://static.crates.io/crates/${package}/${package}-${version}.crate"
+            test "$(sha256sum "${artifact}" | awk '{print $1}')" = "${checksum}"
+            source_revision="$(tar -xOf "${artifact}" "${package}-${version}/.cargo_vcs_info.json" | jq -er '.git.sha1')"
+            if [ "${source_revision}" != "${tag_revision}" ]; then
+              echo "${package} ${version} was built from ${source_revision}, not tag ${tag} (${tag_revision})" >&2
+              exit 1
+            fi
+            echo "${package} ${version}: registry bytes match the tag and the registry checksum"
+          done
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "CARGO_REGISTRY_TOKEN is empty; it must carry the crates.io yank scope" >&2
+            exit 1
+          fi
+          for package in "${packages[@]}"; do
+            state="$(mktemp)"
+            code="$(registry_json "${package}" 0.0.1 "${state}")"
+            if [ "${code}" = "404" ]; then
+              echo "${package}: no 0.0.1 bootstrap to yank"
+              continue
+            fi
+            if [ "${code}" != "200" ]; then
+              echo "reading ${package} 0.0.1 failed: HTTP ${code}" >&2
+              exit 1
+            fi
+            if jq -e '.version.yanked == true' "${state}" >/dev/null; then
+              echo "${package}: 0.0.1 already yanked"
+              continue
+            fi
+            cargo yank --version 0.0.1 "${package}"
+            code="$(registry_json "${package}" 0.0.1 "${state}")"
+            if [ "${code}" != "200" ] || ! jq -e '.version.yanked == true' "${state}" >/dev/null; then
+              echo "${package}: 0.0.1 is not yanked after the yank request" >&2
+              exit 1
+            fi
+            echo "${package}: 0.0.1 yanked"
+          done
+          echo "dest ${version} readback holds and the 0.0.1 bootstrap is yanked"

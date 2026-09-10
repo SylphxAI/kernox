@@ -7,6 +7,14 @@ evidence are mature.
 
 ## [Unreleased]
 
+### Added
+
+- `release.yml` registers and reads back the crates.io trusted publisher for
+  the seven release crates through a maintenance dispatch, and yanks the
+  `0.0.1` crate-name-existence bootstrap only after the dest `0.1.x` registry
+  readback is re-proved from the registry bytes and their tagged source
+  revision.
+
 ### Changed
 
 - Public listing, contributing path, delivery gates, and `GraphBuilder::new` rustdoc no longer sell Kernox as a default company kernel or a production product. Dest remains experimental-engine, not a default dependency.
