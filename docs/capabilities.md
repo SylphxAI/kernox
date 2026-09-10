@@ -69,7 +69,12 @@ not live proof.
   Registration uses a registry API token with the crates.io
   `trusted-publishing` scope and is never a publish path; the yank uses a
   registry API token with the `yank` scope and refuses to act before the
-  readback above is re-proved from the registry itself.
+  readback above is re-proved from the registry itself: for every release
+  crate the registry API must serve the tag's version as a not-yanked record,
+  the crate index must serve that version with the same checksum, the bytes
+  served by the registry must hash to that checksum, a locked rebuild of the
+  tagged clean source must be byte-identical to them, and those bytes must
+  record the tag's commit as their source revision.
 - **Consumed receipts.** crates.io registry readback (index status, version
   identity, checksum, not-yanked) is the publication truth it consumes;
   GitHub build-provenance attestation receipts bind artifacts to the tagged
