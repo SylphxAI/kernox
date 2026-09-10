@@ -1154,6 +1154,77 @@ fn quiesce_runs_after_scope_admission_closes() {
     });
 }
 
+struct PendingShutdownPlugin {
+    descriptor: PluginDescriptor,
+}
+
+impl PendingShutdownPlugin {
+    fn new() -> Self {
+        Self {
+            descriptor: PluginDescriptor::new(plugin_id("dev.example.pending"), version())
+                .provide(CapabilityOffer::new(capability_id(ClockCapability::ID), version()))
+                .unwrap(),
+        }
+    }
+}
+
+impl Plugin for PendingShutdownPlugin {
+    fn descriptor(&self) -> &PluginDescriptor {
+        &self.descriptor
+    }
+
+    fn initialize<'a>(
+        &'a mut self,
+        _context: InitializationContext<'a>,
+    ) -> BoxFuture<'a, Result<ProvisionSet, PluginError>> {
+        let clock: Arc<dyn Clock> = Arc::new(TickClock(7));
+        Box::pin(async move {
+            ProvisionSet::new()
+                .provide::<ClockCapability>(clock)
+                .map_err(|error| PluginError::new(error.tag(), error.to_string()))
+        })
+    }
+
+    fn quiesce<'a>(
+        &'a mut self,
+        _context: LifecycleContext<'a>,
+    ) -> BoxFuture<'a, Result<(), PluginError>> {
+        Box::pin(std::future::pending())
+    }
+}
+
+#[test]
+fn capability_access_stays_closed_after_a_cancelled_shutdown() {
+    use std::future::Future;
+    use std::task::Context;
+
+    block_on(async {
+        let mut app = AppBuilder::new()
+            .plugin(PendingShutdownPlugin::new())
+            .resolve()
+            .unwrap()
+            .start()
+            .await
+            .unwrap();
+        let provider = plugin_id("dev.example.pending");
+        assert_eq!(app.capability_from::<ClockCapability>(&provider).unwrap().tick(), 7);
+
+        // Cancel `shutdown` after its first poll: admission is already closed,
+        // but cleanup (and the cached terminal report) has not finished.
+        let mut shutdown = Box::pin(app.shutdown());
+        let mut context = Context::from_waker(futures::task::noop_waker_ref());
+        assert!(shutdown.as_mut().poll(&mut context).is_pending());
+        drop(shutdown);
+
+        assert_eq!(app.scope().state(), ScopeState::Closing);
+        let error = app
+            .capability_from::<ClockCapability>(&provider)
+            .err()
+            .expect("root access must stay closed once shutdown admission has closed");
+        assert_eq!(error.tag(), "access.application-unavailable");
+    });
+}
+
 struct InvalidIdentifierCapability;
 
 impl Capability for InvalidIdentifierCapability {
