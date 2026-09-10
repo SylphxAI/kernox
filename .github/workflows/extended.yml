@@ -80,3 +80,8 @@ jobs:
           path: benchmark.txt
           if-no-files-found: error
           retention-days: 30
+      # Fail-closed enforcement of the declared 2% steady-state budget over the
+      # Criterion estimates written by the step above. Runs after the evidence
+      # upload so a failing gate still retains benchmark.txt.
+      - name: Enforce steady-state budget
+        run: cargo run --locked -p xtask -- bench-budget

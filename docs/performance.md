@@ -5,6 +5,66 @@ The scheduled benchmark workflow reruns the same source benchmark and retains
 its raw output. Changes to graph resolution, typed provision lookup, or handle
 shape must be re-measured.
 
+## Steady-state budget gate — 2026-09-10
+
+The steady-state comparison is enforced as a fail-closed gate, not recorded as
+a single observation. `cargo run --locked -p xtask -- bench-budget
+[--criterion-dir DIR]` reads the Criterion 0.8.2 machine-readable estimates from
+the default directory `target/criterion`:
+
+- `steady-state-call/direct-arc-dyn-trait/new/estimates.json`
+- `steady-state-call/kernox-extracted-arc-dyn-trait/new/estimates.json`
+
+The gate uses only `mean.point_estimate` and
+`mean.confidence_interval.lower_bound` / `mean.confidence_interval.upper_bound`
+(nanoseconds), computes
+
+```text
+delta = (kernox_point - direct_point) / direct_point
+```
+
+and passes when `delta <= 0.02`. Exactly 2% passes because the claim is "no
+greater than 2%"; any delta above 2% fails with a non-zero exit. The two
+`mean.confidence_interval` ranges are also compared as closed intervals and
+reported as overlapping or not; overlap is informational and never waives the
+point-estimate budget. Missing estimate files, an absent benchmark, unparsable
+JSON, and missing, non-numeric, non-finite, non-positive, or out-of-order
+fields fail closed with a message naming the path and field. Every run prints
+`bench-budget.direct=<ns>`, `bench-budget.kernox=<ns>`,
+`bench-budget.direct.interval=[lo, hi]`, `bench-budget.kernox.interval=[lo, hi]`,
+`bench-budget.delta=<fraction>`, `bench-budget.overlap=true|false`, and
+`bench-budget.result=pass|fail`. The console `time:` line Criterion prints is
+its slope estimate; the gate deliberately reads `mean`.
+
+The scheduled extended lane runs `cargo bench --locked -p kernox --bench kernel`
+and then this gate in the same job, after the raw benchmark text has been
+uploaded as the `kernox-benchmark-<sha>` artifact, so a failing gate still
+retains the raw output.
+
+Local gate measurement (2026-09-10, Linux 6.18.18 x86_64, AMD EPYC 9454,
+rustc 1.97.1, optimized bench profile, host shared with concurrent builds):
+
+```text
+CARGO_TARGET_DIR=$PWD/target cargo bench --locked -p kernox --bench kernel -- steady-state-call
+cargo run --locked -p xtask -- bench-budget
+```
+
+| Quantity | Value |
+| --- | ---: |
+| Direct `Arc<dyn Trait>` mean | 1.811175 ns, CI [1.666520, 1.970681] |
+| Kernox-extracted mean | 1.404055 ns, CI [1.379346, 1.434997] |
+| Delta (point estimates) | −0.224783 |
+| Intervals overlap | false |
+| Result | pass |
+
+The negative delta is run noise on a shared host (the capability audit measured
+roughly a ±2–4% spread for this same comparison), not an acceleration claim:
+both paths are the same direct dynamic trait call after boot. The retained
+extended-lane measurement artifact
+`kernox-benchmark-9a9d3f9037756cbb0345578a9b21a9f55c5aa31b` from schedule run
+34080224078 predates this gate; the claim-honesty change records its detailed
+numbers. This gate applies the same rule to every scheduled run going forward.
+
 ## Baseline — 2026-08-15
 
 Command:
