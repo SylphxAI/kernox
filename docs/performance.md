@@ -81,8 +81,20 @@ cargo run --locked -p xtask -- bench-budget --not-before "$start"
 
 The five per-run deltas spanned 0.532298 (median +0.050952) on this loaded
 shared host: a single run cannot decide this budget, and none of these runs is
-an acceleration claim. The observed lane spread from the dispatched extended
-run is recorded below. The retained extended-lane measurement artifact
+an acceleration claim.
+
+Dispatched extended-lane measurement (run
+[34536513077](https://github.com/SylphxAI/kernox/actions/runs/34536513077),
+benchmark job `success`, revision
+`c90e0bdf3dae6f835e4c7f3361b99ce1bbe6a606`, self-hosted Linux runner,
+2026-09-10): the five per-run deltas were −0.003481, −0.004128, −0.009412,
+−0.034149, and +0.009471 (median −0.004128; per-run spread 0.043620), and the
+per-side minima (direct 1.373721 ns, Kernox 1.362712 ns) gave the enforced
+statistic −0.008014 → `bench-budget.result=pass`. The observed 0.043620 spread
+with five runs is the lane's noise floor for this statistical method; the
+workflow run also contains the mutation and fuzz jobs, whose failing state is
+independent of this change, while the benchmark job itself completed
+`success`. The retained extended-lane measurement artifact
 `kernox-benchmark-9a9d3f9037756cbb0345578a9b21a9f55c5aa31b` from schedule run
 34080224078 predates this gate; the claim-honesty change records its detailed
 numbers.
