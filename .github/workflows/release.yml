@@ -264,7 +264,15 @@ jobs:
             # under `jq -e` on jq 1.6, so an unreadable listing must be
             # rejected explicitly before the positive predicate is trusted.
             if [ ! -s "${output}" ]; then
-              return 1
+              return 2
+            fi
+            # A non-empty body that does not parse as the documented listing
+            # shape is an unreadable listing too, not "no configuration yet":
+            # creating on top of it could add a duplicate configuration.
+            if ! jq -e -s '
+              (.[0] | type == "object") and ((.[0].github_configs | type) == "array")
+            ' "${output}" >/dev/null; then
+              return 2
             fi
             jq -e -s '
               [
@@ -285,12 +293,20 @@ jobs:
               head -c 2000 "${listing}" >&2
               exit 1
             fi
-            if has_config "${listing}"; then
+            config_state=0
+            has_config "${listing}" || config_state=$?
+            if [ "${config_state}" -eq 0 ]; then
               echo "${package}: trusted publisher already registered"
               continue
             fi
+            if [ "${config_state}" -ne 1 ]; then
+              echo "the trusted publishing listing for ${package} is not a readable config list; refusing to create on top of it" >&2
+              head -c 2000 "${listing}" >&2
+              exit 1
+            fi
             creation="$(mktemp)"
-            code="$(curl --retry 3 --retry-connrefused --silent --show-error --user-agent "${user_agent}" \
+            # The create call is not idempotent, so it is never retried.
+            code="$(curl --silent --show-error --user-agent "${user_agent}" \
               --header "Authorization: Bearer ${CARGO_REGISTRY_TOKEN}" \
               --header "Content-Type: application/json" \
               --data "$(jq -cn --arg package "${package}" '{
@@ -354,6 +370,11 @@ jobs:
       - name: Prove the dest readback then yank the bootstrap
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          # Package into a private target directory so the rebuild proof can
+          # never read a leftover artifact from another step or job; the
+          # per-attempt name keeps a persisted self-hosted workspace from
+          # seeding it either. `runner` is only available at step scope.
+          CARGO_TARGET_DIR: ${{ runner.temp }}/kernox-yank-target-${{ github.run_id }}-${{ github.run_attempt }}
         shell: bash
         run: |
           set -euo pipefail
@@ -416,14 +437,44 @@ jobs:
                 .version.checksum
               end
             ' "${metadata}")"
-            index="$(mktemp)"
+          index="$(mktemp)"
+          # The index can lag the API right after a publish, so a 404 is
+          # retried for a bounded window; anything else fails closed at once.
+          code=404
+          for attempt in $(seq 1 12); do
             code="$(fetch_json "https://index.crates.io/${package:0:2}/${package:2:2}/${package}" "${index}")"
-            if [ "${code}" != "200" ]; then
-              echo "the crate index does not serve ${package}: HTTP ${code}" >&2
-              exit 1
+            if [ "${code}" = "200" ]; then
+              break
             fi
-            require_body "${index}" "index.crates.io ${package}"
-            index_checksum="$(grep -F "\"vers\":\"${version}\"" "${index}" | jq -er '.cksum')"
+            if [ "${code}" != "404" ]; then
+              break
+            fi
+            if [ "${attempt}" -ge 12 ]; then
+              break
+            fi
+            echo "the crate index does not serve ${package} ${version} yet (attempt ${attempt}); retrying" >&2
+            sleep 10
+          done
+          if [ "${code}" != "200" ]; then
+            echo "the crate index does not serve ${package}: HTTP ${code}" >&2
+            exit 1
+          fi
+          require_body "${index}" "index.crates.io ${package}"
+          index_record="$(grep -F "\"vers\":\"${version}\"" "${index}" || true)"
+          if [ -z "${index_record}" ]; then
+            echo "the crate index has no ${package} ${version} record" >&2
+            exit 1
+          fi
+          if ! index_checksum="$(jq -er --arg package "${package}" '
+            if .name != $package then
+              error("index record name is not the requested package")
+            else
+              .cksum
+            end
+          ' <<<"${index_record}")"; then
+            echo "the crate index record for ${version} is not a valid ${package} record" >&2
+            exit 1
+          fi
             if [ "${index_checksum}" != "${checksum}" ]; then
               echo "the crate index checksum for ${package} ${version} is not the registry checksum" >&2
               exit 1
@@ -446,9 +497,13 @@ jobs:
               echo "${package} ${version} was not built from the clean tag ${tag} (${tag_revision})" >&2
               exit 1
             fi
-            local_artifact="target/package/${package}-${version}.crate"
+            target_root="${CARGO_TARGET_DIR:?the rebuild target directory must be set for this job}"
+            local_artifact="${target_root}/package/${package}-${version}.crate"
             if [ ! -s "${local_artifact}" ]; then
-              echo "the locked rebuild did not produce ${local_artifact}" >&2
+              local_artifact="$(find "${target_root}" -maxdepth 3 -type f -name "${package}-${version}.crate" -not -path '*tmp-crate*' -print -quit)"
+            fi
+            if [ -z "${local_artifact}" ] || [ ! -s "${local_artifact}" ]; then
+              echo "the locked rebuild of ${tag} produced no ${package}-${version}.crate" >&2
               exit 1
             fi
             rebuilt="$(sha256sum "${local_artifact}" | awk '{print $1}')"
@@ -471,17 +526,34 @@ jobs:
               exit 1
             fi
             require_body "${state}" "crates.io ${package} 0.0.1"
-            if jq -e -s 'length == 1 and .[0].version.yanked == true' "${state}" >/dev/null; then
+            if jq -e -s --arg package "${package}" '
+              length == 1
+              and .[0].version.crate == $package
+              and .[0].version.num == "0.0.1"
+              and .[0].version.yanked == true
+            ' "${state}" >/dev/null; then
               echo "${package}: 0.0.1 already yanked"
               yanked=$((yanked + 1))
               continue
             fi
-            jq -e -s 'length == 1 and .[0].version.crate == $package and .[0].version.num == "0.0.1" and .[0].version.yanked == false' \
-              --arg package "${package}" "${state}" >/dev/null
+            if ! jq -e -s --arg package "${package}" '
+              length == 1
+              and .[0].version.crate == $package
+              and .[0].version.num == "0.0.1"
+              and .[0].version.yanked == false
+            ' "${state}" >/dev/null; then
+              echo "the crates.io 0.0.1 record for ${package} is not the expected unyanked version; refusing to yank" >&2
+              exit 1
+            fi
             cargo yank --version 0.0.1 "${package}"
             code="$(fetch_json "https://crates.io/api/v1/crates/${package}/0.0.1" "${state}")"
             if [ "${code}" != "200" ] || [ ! -s "${state}" ] \
-              || ! jq -e -s 'length == 1 and .[0].version.yanked == true' "${state}" >/dev/null; then
+              || ! jq -e -s --arg package "${package}" '
+                length == 1
+                and .[0].version.crate == $package
+                and .[0].version.num == "0.0.1"
+                and .[0].version.yanked == true
+              ' "${state}" >/dev/null; then
               echo "${package}: 0.0.1 is not yanked after the yank request" >&2
               exit 1
             fi
