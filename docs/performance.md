@@ -10,7 +10,11 @@ shape must be re-measured.
 The steady-state comparison is enforced as a fail-closed gate, not recorded as
 a single observation. `cargo run --locked -p xtask -- bench-budget
 [--criterion-dir DIR]` reads the Criterion 0.8.2 machine-readable estimates from
-the default directory `target/criterion`:
+the default directory `<cargo target directory>/criterion`, where the target
+directory is resolved with `cargo metadata --locked --format-version 1
+--no-deps` (`target_directory`) so a configured `CARGO_TARGET_DIR` or other
+target-directory configuration is honored; `--criterion-dir DIR` overrides the
+default:
 
 - `steady-state-call/direct-arc-dyn-trait/new/estimates.json`
 - `steady-state-call/kernox-extracted-arc-dyn-trait/new/estimates.json`
@@ -42,18 +46,21 @@ uploaded as the `kernox-benchmark-<sha>` artifact, so a failing gate still
 retains the raw output.
 
 Local gate measurement (2026-09-10, Linux 6.18.18 x86_64, AMD EPYC 9454,
-rustc 1.97.1, optimized bench profile, host shared with concurrent builds):
+rustc 1.97.1, optimized bench profile, host shared with concurrent builds; no
+environment override and no `--criterion-dir`, so the gate resolved the host's
+configured `CARGO_TARGET_DIR` itself and reported
+`bench-budget.criterion-dir=/scratch/cargo-target/kernox-benchmark-budget--5fbf89dacdad11c0/criterion`):
 
 ```text
-CARGO_TARGET_DIR=$PWD/target cargo bench --locked -p kernox --bench kernel -- steady-state-call
+cargo bench --locked -p kernox --bench kernel -- steady-state-call
 cargo run --locked -p xtask -- bench-budget
 ```
 
 | Quantity | Value |
 | --- | ---: |
-| Direct `Arc<dyn Trait>` mean | 1.811175 ns, CI [1.666520, 1.970681] |
-| Kernox-extracted mean | 1.404055 ns, CI [1.379346, 1.434997] |
-| Delta (point estimates) | −0.224783 |
+| Direct `Arc<dyn Trait>` mean | 1.447385 ns, CI [1.432111, 1.463806] |
+| Kernox-extracted mean | 1.363880 ns, CI [1.355462, 1.373399] |
+| Delta (point estimates) | −0.057694 |
 | Intervals overlap | false |
 | Result | pass |
 

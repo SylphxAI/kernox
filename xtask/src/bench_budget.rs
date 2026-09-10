@@ -17,6 +17,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 /// Declared acceptance budget for the steady-state point-estimate delta.
@@ -149,10 +150,18 @@ pub(crate) fn run(criterion_dir: &Path) -> Result<(), String> {
     }
 }
 
-/// Parses `bench-budget [--criterion-dir <dir>]`; the default is the Criterion
-/// output directory `target/criterion` produced by `cargo bench`.
-pub(crate) fn parse_criterion_dir(arguments: &[String]) -> Result<PathBuf, String> {
-    let mut criterion_dir = PathBuf::from("target/criterion");
+/// Criterion directory selection: the resolved Cargo target directory by
+/// default, or an explicit `--criterion-dir` override.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum CriterionDir {
+    Default,
+    Explicit(PathBuf),
+}
+
+/// Parses `bench-budget [--criterion-dir <dir>]`; without the override the
+/// directory is resolved from Cargo's actual target directory.
+pub(crate) fn parse_criterion_dir(arguments: &[String]) -> Result<CriterionDir, String> {
+    let mut selection = CriterionDir::Default;
     let mut index = 0;
     while index < arguments.len() {
         match arguments[index].as_str() {
@@ -160,24 +169,64 @@ pub(crate) fn parse_criterion_dir(arguments: &[String]) -> Result<PathBuf, Strin
                 if index + 1 >= arguments.len() {
                     return Err("bench-budget expects --criterion-dir DIR".to_owned());
                 }
-                criterion_dir = PathBuf::from(&arguments[index + 1]);
+                selection = CriterionDir::Explicit(PathBuf::from(&arguments[index + 1]));
                 index += 2;
             }
             argument => return Err(format!("unknown bench-budget argument {argument}")),
         }
     }
-    Ok(criterion_dir)
+    Ok(selection)
+}
+
+/// Resolves the selection: an explicit directory is used as-is; otherwise the
+/// Cargo target directory is read from `cargo metadata`, so a configured
+/// `CARGO_TARGET_DIR` (or any other target-directory configuration) is honored
+/// instead of assuming a relative `target` directory.
+pub(crate) fn resolve_criterion_dir(selection: CriterionDir) -> Result<PathBuf, String> {
+    match selection {
+        CriterionDir::Explicit(criterion_dir) => Ok(criterion_dir),
+        CriterionDir::Default => {
+            let output = Command::new("cargo")
+                .args(["metadata", "--locked", "--format-version", "1", "--no-deps"])
+                .output()
+                .map_err(|error| {
+                    format!("could not run cargo metadata to resolve the target directory: {error}")
+                })?;
+            if !output.status.success() {
+                return Err(format!(
+                    "cargo metadata failed while resolving the target directory: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
+            let source = std::str::from_utf8(&output.stdout)
+                .map_err(|error| format!("cargo metadata output is not UTF-8: {error}"))?;
+            target_directory_from_metadata(source).map(|target| target.join("criterion"))
+        }
+    }
+}
+
+/// Reads the absolute `target_directory` that `cargo metadata` reports for
+/// this workspace and machine configuration.
+pub(crate) fn target_directory_from_metadata(source: &str) -> Result<PathBuf, String> {
+    let document: serde_json::Value = serde_json::from_str(source)
+        .map_err(|error| format!("unparsable cargo metadata: {error}"))?;
+    let target_directory = document
+        .get("target_directory")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "cargo metadata is missing a string target_directory".to_owned())?;
+    Ok(PathBuf::from(target_directory))
 }
 
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     use super::{
-        DIRECT_BENCHMARK, Estimate, KERNOX_BENCHMARK, STEADY_STATE_BUDGET, estimate_path, evaluate,
-        parse_criterion_dir, parse_estimate,
+        CriterionDir, DIRECT_BENCHMARK, Estimate, KERNOX_BENCHMARK, STEADY_STATE_BUDGET,
+        estimate_path, evaluate, parse_criterion_dir, parse_estimate, resolve_criterion_dir,
+        target_directory_from_metadata,
     };
 
     const DIRECT_SOURCE: &str = r#"{
@@ -314,13 +363,41 @@ mod tests {
 
     #[test]
     fn criterion_dir_argument_defaults_and_overrides() {
-        assert_eq!(parse_criterion_dir(&[]).expect("default"), Path::new("target/criterion"));
+        assert_eq!(parse_criterion_dir(&[]).expect("default"), CriterionDir::Default);
         assert_eq!(
             parse_criterion_dir(&["--criterion-dir".to_owned(), "/tmp/custom".to_owned()])
                 .expect("override"),
-            Path::new("/tmp/custom")
+            CriterionDir::Explicit(PathBuf::from("/tmp/custom"))
         );
         assert!(parse_criterion_dir(&["--criterion-dir".to_owned()]).is_err());
         assert!(parse_criterion_dir(&["--other".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn explicit_criterion_dir_is_used_as_is() {
+        assert_eq!(
+            resolve_criterion_dir(CriterionDir::Explicit(PathBuf::from("/tmp/custom")))
+                .expect("explicit"),
+            Path::new("/tmp/custom")
+        );
+    }
+
+    #[test]
+    fn default_criterion_dir_resolves_from_cargo_metadata_target() {
+        let metadata =
+            r#"{"target_directory":"/scratch/cargo-target/kernox--abc123","packages":[]}"#;
+        let target = target_directory_from_metadata(metadata).expect("target directory");
+        assert_eq!(target, Path::new("/scratch/cargo-target/kernox--abc123"));
+        assert_eq!(
+            target.join("criterion"),
+            Path::new("/scratch/cargo-target/kernox--abc123/criterion")
+        );
+    }
+
+    #[test]
+    fn metadata_without_a_string_target_directory_fails_closed() {
+        assert!(target_directory_from_metadata("{}").is_err());
+        assert!(target_directory_from_metadata(r#"{"target_directory":7}"#).is_err());
+        assert!(target_directory_from_metadata("not json").is_err());
     }
 }

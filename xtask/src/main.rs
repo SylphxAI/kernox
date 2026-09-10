@@ -33,6 +33,7 @@ fn main() -> ExitCode {
         Some("bench-budget") => {
             let arguments = arguments.collect::<Vec<_>>();
             bench_budget::parse_criterion_dir(&arguments)
+                .and_then(bench_budget::resolve_criterion_dir)
                 .and_then(|criterion_dir| bench_budget::run(&criterion_dir))
         }
         _ => {
