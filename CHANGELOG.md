@@ -11,12 +11,25 @@ evidence are mature.
 
 - Public listing, contributing path, delivery gates, and `GraphBuilder::new` rustdoc no longer sell Kernox as a default company kernel or a production product. Dest remains experimental-engine, not a default dependency.
 
-## [0.1.1] - 2026-09-06
+## [0.1.1]
 
-First dest `0.1.x` public package probe. Immutable tag `v0.1.0` is not this
-probe: it is an ancestor of an older `main`, OIDC trusted publishing was not
-configured, and the tag must not be moved. `0.0.1` remains crate-name existence
-until dest `0.1.x` registry readback.
+Not a published release, and no release date is recorded. The first dest
+`0.1.x` package-probe candidate exists as tag `v0.1.1` (lightweight tag pushed
+2026-09-10, commit `bb4a2e1`), but the tag-gated publisher has not completed
+crates.io readback: crates.io serves only `0.0.1` (not yanked) for all seven
+packages.
+
+Evidence verified 2026-09-10: release run `34530199204` failed at OIDC
+authentication (error: `No Trusted Publishing config found for repository
+SylphxAI/kernox`) and skipped the publish/readback step; no GitHub Release
+exists for the tag (`releases/tags/v0.1.1` returns 404); `git ls-remote --tags
+origin` shows `refs/tags/v0.1.1` = `bb4a2e13807b0d1951c253b0e30941f8008d674b`
+with no dereferenced `^{}` line (lightweight); the crates.io versions API
+returns only `0.0.1` for `kernox`, `kernox-core`, `kernox-runtime`,
+`kernox-host-serverless`, `kernox-host-tokio`, `kernox-testkit`, and
+`cargo-kernox`. Immutable tag `v0.1.0` is an older ancestor and is not this
+probe; `0.0.1` remains crate-name existence until dest `0.1.x` registry
+readback.
 
 ### Changed
 
@@ -63,4 +76,4 @@ until dest `0.1.x` registry readback.
   Tokio host crate, and the CLI host crate remains absent.
 
 [Unreleased]: https://github.com/SylphxAI/kernox/compare/v0.1.1...HEAD
-[0.1.1]: https://github.com/SylphxAI/kernox/releases/tag/v0.1.1
+[0.1.1]: https://github.com/SylphxAI/kernox/compare/v0.1.0...v0.1.1

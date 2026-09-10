@@ -88,6 +88,50 @@ command enforces a deliberately broad p99 guardrail of 5 ms and a max-call
 guardrail of 100 ms: these catch gross regressions in the real consumer path
 without pretending to be an SLA.
 
+## Extended-lane steady-state benchmark — 2026-09-07
+
+The scheduled extended lane reruns the same Criterion benchmark on a platform
+runner and retains the raw output as a build artifact. The retained artifact
+`kernox-benchmark-9a9d3f9037756cbb0345578a9b21a9f55c5aa31b` (schedule run
+`34080224078`, commit `9a9d3f9`, benchmark job success at 2026-09-07T03:41:52Z)
+was downloaded with `gh run download 34080224078 --name
+kernox-benchmark-9a9d3f9037756cbb0345578a9b21a9f55c5aa31b`; the unpacked
+`benchmark.txt` has sha256
+`575dd60b7ed4b1dfbfe47dc698c44a59bfee2c654ffc3d14e63bbd20abf20e28`.
+
+Command and environment:
+
+```text
+cargo bench --locked -p kernox --bench kernel
+```
+
+Criterion defaults (100 samples per steady-state benchmark) under the pinned
+1.97.1 toolchain on the `sylphx-linux-standard` runner. Criterion printed
+exactly:
+
+```text
+steady-state-call/direct-arc-dyn-trait
+                        time:   [1.3314 ns 1.3369 ns 1.3440 ns]
+steady-state-call/kernox-extracted-arc-dyn-trait
+                        time:   [1.3265 ns 1.3287 ns 1.3314 ns]
+```
+
+| Path | Point estimate | 95% confidence interval |
+| --- | ---: | ---: |
+| Direct `Arc<dyn Trait>` call | 1.3369 ns | 1.3314–1.3440 ns |
+| Kernox-extracted `Arc<dyn Trait>` call | 1.3287 ns | 1.3265–1.3314 ns |
+
+The point-estimate delta is approximately −0.61% (Kernox-extracted below
+direct). The printed confidence intervals share only the endpoint 1.3314 ns and
+do not otherwise overlap. The declared 2% budget holds on this observation.
+
+Limits: this is one scheduled observation at Criterion's default sampling. The
+artifact does not record the runner's machine class, and a single Criterion
+comparison is not a stable contract (the 2026-08-16 matrix above records a
+roughly 2% spread on the same machine). This section records the budget
+comparison for that run; it does not establish the budget as a
+distribution-level guarantee, and budget enforcement is a separate gate.
+
 ## What this does not prove
 
 Kernox is not yet “optimized to the limit.” The evidence proves that the
