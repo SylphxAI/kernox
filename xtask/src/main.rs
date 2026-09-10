@@ -2,8 +2,8 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
-    fs,
-    path::Path,
+    fs, io,
+    path::{Path, PathBuf},
     process::{Command, ExitCode},
 };
 
@@ -18,6 +18,12 @@ const RELEASE_ORDER: &[&str] = &[
 ];
 const APPROVED_RUNNERS: [&str; 2] =
     ["sylphx-linux-standard", "[self-hosted, sylphx, macos, standard]"];
+/// Secret-scan oracle pin (audit F2). The version and the Linux x64 archive
+/// checksum come from the gitleaks `v8.30.1` release `gitleaks_8.30.1_checksums.txt`
+/// and are repeated by the `ci.yml` verify job.
+const GITLEAKS_VERSION: &str = "8.30.1";
+const GITLEAKS_LINUX_X64_ARCHIVE_SHA256: &str =
+    "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb";
 
 fn main() -> ExitCode {
     let mut arguments = std::env::args().skip(1);
@@ -121,6 +127,7 @@ fn verify() -> Result<(), String> {
     verify_clean_consumer_fanout()?;
     run("dependency-policy", "cargo", &["deny", "check"], &[])?;
     run("advisories", "cargo", &["audit", "--deny", "warnings"], &[])?;
+    verify_secret_scan()?;
     run("core-package", "cargo", &["package", "--locked", "-p", "kernox-core"], &[])?;
     Ok(())
 }
@@ -394,6 +401,112 @@ fn run(
     }
     let status = command.status().map_err(|error| format!("could not run {program}: {error}"))?;
     if status.success() { Ok(()) } else { Err(format!("{label} exited with {status}")) }
+}
+
+/// Fails closed unless the pinned gitleaks reports no committed credentials in
+/// the full repository history.
+fn verify_secret_scan() -> Result<(), String> {
+    println!("verify.secret-scan");
+    let scanner = pinned_gitleaks()?;
+    let status = Command::new(&scanner)
+        .args(["git", "--no-banner", "--redact", "--verbose", "--log-opts=--all", "."])
+        .status()
+        .map_err(|error| format!("could not run {}: {error}", scanner.display()))?;
+    if !status.success() {
+        return Err(format!(
+            "the pinned gitleaks secret scan found committed credentials in repository history ({status}); remove the secret and rotate it instead of allowlisting it"
+        ));
+    }
+    Ok(())
+}
+
+/// Returns a gitleaks binary at [`GITLEAKS_VERSION`].
+///
+/// An exact-version scanner already on `PATH` wins. Otherwise the pinned,
+/// checksum-verified Linux x64 release is installed under `target/kernox-tools`:
+/// the tag workflow runs this same entrypoint without installing a scanner, so
+/// the oracle provisions itself and still fails closed when it cannot.
+fn pinned_gitleaks() -> Result<PathBuf, String> {
+    let from_path = PathBuf::from("gitleaks");
+    if matches!(gitleaks_version(&from_path)?.as_deref(), Some(GITLEAKS_VERSION)) {
+        return Ok(from_path);
+    }
+    let install_dir =
+        Path::new("target").join("kernox-tools").join(format!("gitleaks-{GITLEAKS_VERSION}"));
+    let installed = install_dir.join("gitleaks");
+    if matches!(gitleaks_version(&installed)?.as_deref(), Some(GITLEAKS_VERSION)) {
+        return Ok(installed);
+    }
+    install_pinned_gitleaks(&install_dir)
+}
+
+fn gitleaks_version(program: &Path) -> Result<Option<String>, String> {
+    let output = match Command::new(program).arg("version").output() {
+        Ok(output) => output,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("could not inspect {}: {error}", program.display())),
+    };
+    if !output.status.success() {
+        return Ok(None);
+    }
+    Ok(Some(String::from_utf8_lossy(&output.stdout).trim().to_owned()))
+}
+
+fn install_pinned_gitleaks(install_dir: &Path) -> Result<PathBuf, String> {
+    if (std::env::consts::OS, std::env::consts::ARCH) != ("linux", "x86_64") {
+        return Err(format!(
+            "gitleaks {GITLEAKS_VERSION} is required for the secret scan; install the pinned release from https://github.com/gitleaks/gitleaks/releases/tag/v{GITLEAKS_VERSION} and put it on PATH"
+        ));
+    }
+    let archive_name = format!("gitleaks_{GITLEAKS_VERSION}_linux_x64.tar.gz");
+    let download_url = format!(
+        "https://github.com/gitleaks/gitleaks/releases/download/v{GITLEAKS_VERSION}/{archive_name}"
+    );
+    fs::create_dir_all(install_dir)
+        .map_err(|error| format!("could not create {}: {error}", install_dir.display()))?;
+    let archive = install_dir.join(archive_name);
+    let download = Command::new("curl")
+        .args(["--fail", "--location", "--silent", "--show-error", "--retry", "3", "--output"])
+        .arg(&archive)
+        .arg(&download_url)
+        .status()
+        .map_err(|error| format!("could not download pinned gitleaks: {error}"))?;
+    if !download.success() {
+        return Err(format!(
+            "could not download pinned gitleaks {GITLEAKS_VERSION} from {download_url} ({download}); install it manually and put it on PATH"
+        ));
+    }
+    let checksum = Command::new("sha256sum")
+        .arg(&archive)
+        .output()
+        .map_err(|error| format!("could not checksum pinned gitleaks: {error}"))?;
+    let observed =
+        String::from_utf8_lossy(&checksum.stdout).split_whitespace().next().map(str::to_owned);
+    if !checksum.status.success() || observed.as_deref() != Some(GITLEAKS_LINUX_X64_ARCHIVE_SHA256)
+    {
+        return Err(format!(
+            "pinned gitleaks checksum mismatch: expected {GITLEAKS_LINUX_X64_ARCHIVE_SHA256}, found {}",
+            observed.as_deref().unwrap_or("no digest")
+        ));
+    }
+    let extract = Command::new("tar")
+        .args(["-xzf"])
+        .arg(&archive)
+        .args(["-C"])
+        .arg(install_dir)
+        .arg("gitleaks")
+        .status()
+        .map_err(|error| format!("could not extract pinned gitleaks: {error}"))?;
+    if !extract.success() {
+        return Err(format!("could not extract pinned gitleaks archive ({extract})"));
+    }
+    let installed = install_dir.join("gitleaks");
+    match gitleaks_version(&installed)?.as_deref() {
+        Some(GITLEAKS_VERSION) => Ok(installed),
+        other => {
+            Err(format!("provisioned gitleaks reports {other:?}, expected {GITLEAKS_VERSION}"))
+        }
+    }
 }
 
 fn enforce_no_cli_host_crate() -> Result<(), String> {

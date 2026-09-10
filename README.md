@@ -91,9 +91,9 @@ cargo run --locked -p xtask -- verify
 ```
 
 It runs formatting, all-target checks, Clippy, tests, rustdoc, the runtime-free
-core boundary, both product paths, dependency policy, RustSec audit, and the
-independently packageable core artifact. Fuzz, mutation, and benchmark
-distributions have separate extended lanes.
+core boundary, both product paths, dependency policy, RustSec audit, a pinned
+full-history secret scan, and the independently packageable core artifact.
+Fuzz, mutation, and benchmark distributions have separate extended lanes.
 
 ## Design and operating contract
 
