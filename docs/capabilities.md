@@ -62,6 +62,19 @@ not live proof.
   registry readback via OIDC trusted publishing (environment `crates-io`).
   It also owns the Cargo workspace manifests and `cargo-kernox`. No
   migration writers exist. API-token publish is not the dest writer.
+- **Owned post-readback actions.** After the dest `0.1.x` registry readback
+  holds, the same tag-gated writer yanks the `0.0.1` crate-name-existence
+  bootstrap versions, and it owns the maintenance action that registers and
+  reads back the crates.io trusted-publisher configs for the release crates.
+  Registration uses a registry API token with the crates.io
+  `trusted-publishing` scope and is never a publish path; the yank uses a
+  registry API token with the `yank` scope and refuses to act before the
+  readback above is re-proved from the registry itself: for every release
+  crate the registry API must serve the tag's version as a not-yanked record,
+  the crate index must serve that version with the same checksum, the bytes
+  served by the registry must hash to that checksum, a locked rebuild of the
+  tagged clean source must be byte-identical to them, and those bytes must
+  record the tag's commit as their source revision.
 - **Consumed receipts.** crates.io registry readback (index status, version
   identity, checksum, not-yanked) is the publication truth it consumes;
   GitHub build-provenance attestation receipts bind artifacts to the tagged
@@ -77,3 +90,6 @@ not live proof.
   version bump as release evidence (this file's edges rule), must not treat
   `0.0.1` crate-name existence as dest, and must not treat API-token publish
   as the dest writer. No second publish writer.
+- **Forbidden yank.** The `0.0.1` bootstrap must not be yanked before the dest
+  `0.1.x` readback is re-proved from the registry, and a yank must not be
+  reported before the registry serves `yanked: true`.
