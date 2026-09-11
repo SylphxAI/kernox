@@ -55,7 +55,11 @@ Exit evidence:
   diagnostics, and recovery behavior are complete.
 - Benchmarks compare graph construction and direct runtime calls with a
   hand-written Rust baseline; budgets in the acceptance contract hold.
-- Dependency, license, advisory, unsafe-code, and secret boundaries are green.
+- Dependency, license, advisory, and unsafe-code boundaries are green, and the
+  pinned full-history credential scan in the repository verification entrypoint
+  reports no committed secrets with no repository-controlled suppression file.
+  The scan is rule-based detection over Git history, not a proof that no secret
+  exists.
 
 ## Gate 5 — Release
 
