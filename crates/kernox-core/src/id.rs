@@ -190,4 +190,54 @@ mod tests {
         let accepted: PluginId = serde_json::from_str("\"dev.kernox.host-tokio\"").unwrap();
         assert_eq!(accepted.as_str(), "dev.kernox.host-tokio");
     }
+
+    #[test]
+    fn enforces_the_total_length_boundary() {
+        // Four maximum-length segments plus separators reach exactly 255 bytes.
+        let at_boundary =
+            [MAX_IDENTIFIER_SEGMENT_LENGTH; 4].map(|length| "a".repeat(length)).join(".");
+        assert_eq!(at_boundary.len(), MAX_IDENTIFIER_LENGTH);
+        assert_eq!(PluginId::new(at_boundary).unwrap().as_str().len(), MAX_IDENTIFIER_LENGTH);
+
+        // Five shorter segments reach 256 bytes, one byte past the total bound.
+        let over_boundary = [63_usize, 63, 63, 62, 1].map(|length| "a".repeat(length)).join(".");
+        assert_eq!(over_boundary.len(), MAX_IDENTIFIER_LENGTH + 1);
+        assert_eq!(
+            PluginId::new(over_boundary).unwrap_err(),
+            IdentifierError::TooLong {
+                actual: MAX_IDENTIFIER_LENGTH + 1,
+                maximum: MAX_IDENTIFIER_LENGTH,
+            }
+        );
+    }
+
+    #[test]
+    fn enforces_the_segment_length_boundary() {
+        let at_boundary = "a".repeat(MAX_IDENTIFIER_SEGMENT_LENGTH);
+        assert_eq!(
+            PluginId::new(at_boundary).unwrap().as_str().len(),
+            MAX_IDENTIFIER_SEGMENT_LENGTH
+        );
+
+        assert_eq!(
+            PluginId::new("a".repeat(MAX_IDENTIFIER_SEGMENT_LENGTH + 1)).unwrap_err(),
+            IdentifierError::SegmentTooLong {
+                segment: 0,
+                actual: MAX_IDENTIFIER_SEGMENT_LENGTH + 1,
+                maximum: MAX_IDENTIFIER_SEGMENT_LENGTH,
+            }
+        );
+    }
+
+    #[test]
+    fn reports_absolute_byte_offsets_for_later_segments() {
+        assert_eq!(
+            PluginId::new("dev.bad@cap").unwrap_err(),
+            IdentifierError::InvalidCharacter { byte_index: 7, character: '@' }
+        );
+        assert_eq!(
+            PluginId::new("dev.example-").unwrap_err(),
+            IdentifierError::InvalidSegmentEnd { segment: 1, byte_index: 11 }
+        );
+    }
 }

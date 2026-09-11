@@ -3,6 +3,10 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # Maintenance entry point for the two non-publish jobs below. The publish
+  # job stays gated on a `v*` tag push through its own `if`, so a dispatch can
+  # never publish and there is still exactly one publish path.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -11,6 +15,8 @@ permissions:
 
 jobs:
   crates-io:
+    name: publish dest 0.1.x
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: sylphx-linux-standard
     timeout-minutes: 45
     environment: crates-io
@@ -209,3 +215,349 @@ jobs:
           for package in "${packages[@]}"; do
             publish_and_wait "${package}"
           done
+
+  register-publisher:
+    name: register crates.io trusted publisher
+    # Maintenance action, never a publish path. It creates the GitHub trusted
+    # publisher configs that bind this repository, this workflow file, and the
+    # `crates-io` environment to the seven release crates, and it reads the
+    # created configs back. crates.io only admits this call with a registry API
+    # token carrying the `trusted-publishing` scope. The scoped token stored
+    # for this repository does not carry it, so the call fails closed with
+    # HTTP 403 (run 33866883483) and no config is created.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: sylphx-linux-standard
+    timeout-minutes: 20
+    steps:
+      - name: Check out default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Ensure every release crate has the expected trusted publisher
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "CARGO_REGISTRY_TOKEN is empty; it must carry the crates.io trusted-publishing scope" >&2
+            exit 1
+          fi
+          user_agent='kernox-ci/1.0 (+https://github.com/SylphxAI/kernox)'
+          packages=(
+            kernox-core
+            kernox-runtime
+            kernox-host-serverless
+            kernox-host-tokio
+            kernox-testkit
+            kernox
+            cargo-kernox
+          )
+          list_configs() {
+            local package="$1" output="$2"
+            curl --retry 3 --retry-connrefused --silent --show-error --user-agent "${user_agent}" \
+              --header "Authorization: Bearer ${CARGO_REGISTRY_TOKEN}" \
+              --output "${output}" --write-out '%{http_code}' \
+              "https://crates.io/api/v1/trusted_publishing/github_configs?crate=${package}"
+          }
+          has_config() {
+            local output="$1"
+            # An empty body from jq's point of view (no input at all) exits 0
+            # under `jq -e` on jq 1.6, so an unreadable listing must be
+            # rejected explicitly before the positive predicate is trusted.
+            if [ ! -s "${output}" ]; then
+              return 2
+            fi
+            # A non-empty body that does not parse as the documented listing
+            # shape is an unreadable listing too, not "no configuration yet":
+            # creating on top of it could add a duplicate configuration.
+            if ! jq -e -s '
+              (.[0] | type == "object") and ((.[0].github_configs | type) == "array")
+            ' "${output}" >/dev/null; then
+              return 2
+            fi
+            jq -e -s '
+              [
+                (.[0].github_configs // [])[]? | select(
+                  ((.repository_owner // "") | ascii_downcase) == "sylphxai"
+                  and ((.repository_name // "") | ascii_downcase) == "kernox"
+                  and .workflow_filename == "release.yml"
+                  and .environment == "crates-io"
+                )
+              ] | length > 0
+            ' "${output}" >/dev/null
+          }
+          for package in "${packages[@]}"; do
+            listing="$(mktemp)"
+            code="$(list_configs "${package}" "${listing}")"
+            if [ "${code}" != "200" ] || [ ! -s "${listing}" ]; then
+              echo "listing trusted publishing configs for ${package} failed: HTTP ${code}" >&2
+              head -c 2000 "${listing}" >&2
+              exit 1
+            fi
+            config_state=0
+            has_config "${listing}" || config_state=$?
+            if [ "${config_state}" -eq 0 ]; then
+              echo "${package}: trusted publisher already registered"
+              continue
+            fi
+            if [ "${config_state}" -ne 1 ]; then
+              echo "the trusted publishing listing for ${package} is not a readable config list; refusing to create on top of it" >&2
+              head -c 2000 "${listing}" >&2
+              exit 1
+            fi
+            creation="$(mktemp)"
+            # The create call is not idempotent, so it is never retried.
+            code="$(curl --silent --show-error --user-agent "${user_agent}" \
+              --header "Authorization: Bearer ${CARGO_REGISTRY_TOKEN}" \
+              --header "Content-Type: application/json" \
+              --data "$(jq -cn --arg package "${package}" '{
+                github_config: {
+                  crate: $package,
+                  repository_owner: "SylphxAI",
+                  repository_name: "kernox",
+                  workflow_filename: "release.yml",
+                  environment: "crates-io"
+                }
+              }')" \
+              --output "${creation}" --write-out '%{http_code}' \
+              https://crates.io/api/v1/trusted_publishing/github_configs)"
+            if [ "${code}" != "200" ] && [ "${code}" != "201" ]; then
+              echo "creating the trusted publisher for ${package} failed: HTTP ${code}" >&2
+              head -c 2000 "${creation}" >&2
+              exit 1
+            fi
+            code="$(list_configs "${package}" "${listing}")"
+            if [ "${code}" != "200" ] || [ ! -s "${listing}" ] || ! has_config "${listing}"; then
+              echo "${package}: the trusted publisher was not readable after creation" >&2
+              exit 1
+            fi
+            echo "${package}: trusted publisher registered for SylphxAI/kernox release.yml [crates-io]"
+          done
+
+  yank-bootstrap:
+    name: yank 0.0.1 bootstrap
+    # Dest requires the `0.0.1` crate-name-existence bootstrap to be yanked
+    # only after the dest `0.1.x` readback holds, so this job re-proves that
+    # readback instead of trusting the publish job's exit status. For every
+    # release crate it requires: the registry API serves the release tag's
+    # version as a non-empty, not-yanked record; the crate index serves the
+    # same version with the same checksum; the bytes served by
+    # static.crates.io hash to that checksum; a locked rebuild of the tagged,
+    # clean source is byte-identical to those bytes; and the bytes' recorded
+    # source revision is the commit `refs/tags/v<version>` points at on
+    # `main`. Only then does it yank `0.0.1`, and it reports the yank only
+    # after the registry serves `yanked: true` for that crate.
+    #
+    # Both arms run outside environment `crates-io`: that environment is
+    # reserved for the tag publish and its branch policy admits tag refs only.
+    # The registry API token used here is the repository-visible org secret;
+    # the dispatch arm is limited to the default branch, so no other ref can
+    # reach this job.
+    if: >-
+      always() && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+      || (startsWith(github.ref, 'refs/tags/v0.1.') && needs.crates-io.result == 'success'))
+    needs: [crates-io]
+    runs-on: sylphx-linux-standard
+    timeout-minutes: 45
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.97.1
+      - name: Prove the dest readback then yank the bootstrap
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          # Package into a private target directory so the rebuild proof can
+          # never read a leftover artifact from another step or job; the
+          # per-attempt name keeps a persisted self-hosted workspace from
+          # seeding it either. `runner` is only available at step scope.
+          CARGO_TARGET_DIR: ${{ runner.temp }}/kernox-yank-target-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          user_agent='kernox-ci/1.0 (+https://github.com/SylphxAI/kernox)'
+          packages=(
+            kernox-core
+            kernox-runtime
+            kernox-host-serverless
+            kernox-host-tokio
+            kernox-testkit
+            kernox
+            cargo-kernox
+          )
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(cargo metadata --no-deps --format-version 1 | jq -er \
+              '.packages[] | select(.name == "kernox") | .version')"
+          fi
+          case "${version}" in
+            0.1.*) ;;
+            *)
+              echo "refusing to yank the 0.0.1 bootstrap outside the dest 0.1.x train: ${version}" >&2
+              exit 1
+              ;;
+          esac
+          tag="v${version}"
+          git fetch --force --no-tags origin "refs/tags/${tag}:refs/tags/${tag}"
+          tag_revision="$(git rev-parse "refs/tags/${tag}^{commit}")"
+          git merge-base --is-ancestor "${tag_revision}" origin/main
+          # Prove the registry bytes from the tagged source, not from the
+          # branch this job happens to run on.
+          git checkout --quiet --detach "${tag_revision}"
+          cargo package --locked --workspace
+          fetch_json() {
+            local url="$1" output="$2"
+            curl --retry 3 --retry-connrefused --silent --show-error \
+              --user-agent "${user_agent}" --output "${output}" \
+              --write-out '%{http_code}' "${url}"
+          }
+          require_body() {
+            local output="$1" what="$2"
+            if [ ! -s "${output}" ]; then
+              echo "empty response body for ${what}; refusing to treat it as evidence" >&2
+              exit 1
+            fi
+          }
+          for package in "${packages[@]}"; do
+            metadata="$(mktemp)"
+            code="$(fetch_json "https://crates.io/api/v1/crates/${package}/${version}" "${metadata}")"
+            if [ "${code}" != "200" ]; then
+              echo "the registry does not serve ${package} ${version}: HTTP ${code}; refusing to yank the bootstrap" >&2
+              exit 1
+            fi
+            require_body "${metadata}" "crates.io ${package} ${version}"
+            checksum="$(jq -er --arg package "${package}" --arg version "${version}" '
+              if .version.crate != $package or .version.num != $version or .version.yanked then
+                error("registry version identity is not the requested package")
+              else
+                .version.checksum
+              end
+            ' "${metadata}")"
+          index="$(mktemp)"
+          # The index can lag the API right after a publish, so a 404 is
+          # retried for a bounded window; anything else fails closed at once.
+          code=404
+          for attempt in $(seq 1 12); do
+            code="$(fetch_json "https://index.crates.io/${package:0:2}/${package:2:2}/${package}" "${index}")"
+            if [ "${code}" = "200" ]; then
+              break
+            fi
+            if [ "${code}" != "404" ]; then
+              break
+            fi
+            if [ "${attempt}" -ge 12 ]; then
+              break
+            fi
+            echo "the crate index does not serve ${package} ${version} yet (attempt ${attempt}); retrying" >&2
+            sleep 10
+          done
+          if [ "${code}" != "200" ]; then
+            echo "the crate index does not serve ${package}: HTTP ${code}" >&2
+            exit 1
+          fi
+          require_body "${index}" "index.crates.io ${package}"
+          index_record="$(grep -F "\"vers\":\"${version}\"" "${index}" || true)"
+          if [ -z "${index_record}" ]; then
+            echo "the crate index has no ${package} ${version} record" >&2
+            exit 1
+          fi
+          if ! index_checksum="$(jq -er --arg package "${package}" '
+            if .name != $package then
+              error("index record name is not the requested package")
+            else
+              .cksum
+            end
+          ' <<<"${index_record}")"; then
+            echo "the crate index record for ${version} is not a valid ${package} record" >&2
+            exit 1
+          fi
+            if [ "${index_checksum}" != "${checksum}" ]; then
+              echo "the crate index checksum for ${package} ${version} is not the registry checksum" >&2
+              exit 1
+            fi
+            artifact="$(mktemp)"
+            curl --retry 5 --retry-connrefused --silent --show-error --location \
+              --user-agent "${user_agent}" --output "${artifact}" \
+              "https://static.crates.io/crates/${package}/${package}-${version}.crate"
+            downloaded="$(sha256sum "${artifact}" | awk '{print $1}')"
+            if [ "${downloaded}" != "${checksum}" ]; then
+              echo "${package} ${version}: the registry bytes do not hash to the registry checksum" >&2
+              exit 1
+            fi
+            vcs="$(tar -xOf "${artifact}" "${package}-${version}/.cargo_vcs_info.json")"
+            source_revision="$(jq -er '.git.sha1' <<<"${vcs}")"
+            # `jq -e` exits 1 for a `false` result, which would abort the step
+            # through `set -e`; compare the rendered flag instead.
+            source_dirty="$(jq -r '(.git.dirty // false) | tostring' <<<"${vcs}")"
+            if [ "${source_revision}" != "${tag_revision}" ] || [ "${source_dirty}" != "false" ]; then
+              echo "${package} ${version} was not built from the clean tag ${tag} (${tag_revision})" >&2
+              exit 1
+            fi
+            target_root="${CARGO_TARGET_DIR:?the rebuild target directory must be set for this job}"
+            local_artifact="${target_root}/package/${package}-${version}.crate"
+            if [ ! -s "${local_artifact}" ]; then
+              local_artifact="$(find "${target_root}" -maxdepth 3 -type f -name "${package}-${version}.crate" -not -path '*tmp-crate*' -print -quit)"
+            fi
+            if [ -z "${local_artifact}" ] || [ ! -s "${local_artifact}" ]; then
+              echo "the locked rebuild of ${tag} produced no ${package}-${version}.crate" >&2
+              exit 1
+            fi
+            rebuilt="$(sha256sum "${local_artifact}" | awk '{print $1}')"
+            if [ "${rebuilt}" != "${checksum}" ]; then
+              echo "a locked rebuild of ${tag} is not byte-identical to the published ${package} ${version}" >&2
+              exit 1
+            fi
+            echo "${package} ${version}: registry, index, published bytes and the locked tag rebuild agree"
+          done
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "CARGO_REGISTRY_TOKEN is empty; it must carry the crates.io yank scope" >&2
+            exit 1
+          fi
+          yanked=0
+          for package in "${packages[@]}"; do
+            state="$(mktemp)"
+            code="$(fetch_json "https://crates.io/api/v1/crates/${package}/0.0.1" "${state}")"
+            if [ "${code}" != "200" ]; then
+              echo "reading the ${package} 0.0.1 bootstrap failed: HTTP ${code}; refusing to report it as yanked" >&2
+              exit 1
+            fi
+            require_body "${state}" "crates.io ${package} 0.0.1"
+            if jq -e -s --arg package "${package}" '
+              length == 1
+              and .[0].version.crate == $package
+              and .[0].version.num == "0.0.1"
+              and .[0].version.yanked == true
+            ' "${state}" >/dev/null; then
+              echo "${package}: 0.0.1 already yanked"
+              yanked=$((yanked + 1))
+              continue
+            fi
+            if ! jq -e -s --arg package "${package}" '
+              length == 1
+              and .[0].version.crate == $package
+              and .[0].version.num == "0.0.1"
+              and .[0].version.yanked == false
+            ' "${state}" >/dev/null; then
+              echo "the crates.io 0.0.1 record for ${package} is not the expected unyanked version; refusing to yank" >&2
+              exit 1
+            fi
+            cargo yank --version 0.0.1 "${package}"
+            code="$(fetch_json "https://crates.io/api/v1/crates/${package}/0.0.1" "${state}")"
+            if [ "${code}" != "200" ] || [ ! -s "${state}" ] \
+              || ! jq -e -s --arg package "${package}" '
+                length == 1
+                and .[0].version.crate == $package
+                and .[0].version.num == "0.0.1"
+                and .[0].version.yanked == true
+              ' "${state}" >/dev/null; then
+              echo "${package}: 0.0.1 is not yanked after the yank request" >&2
+              exit 1
+            fi
+            echo "${package}: 0.0.1 yanked"
+            yanked=$((yanked + 1))
+          done
+          echo "dest ${version} readback holds and ${yanked}/${#packages[@]} 0.0.1 bootstrap versions are yanked"

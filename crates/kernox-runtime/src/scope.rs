@@ -104,6 +104,12 @@ impl Scope {
         decode_state(self.inner.state.load(Ordering::Acquire))
     }
 
+    /// Test-only length of the private child registry.
+    #[cfg(test)]
+    pub(crate) fn child_count(&self) -> usize {
+        self.inner.children.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len()
+    }
+
     pub(crate) fn begin_close(&self) {
         let prior = self.inner.state.swap(ScopeState::Closing as u8, Ordering::AcqRel);
         if prior == ScopeState::Closed as u8 {

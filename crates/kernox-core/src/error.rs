@@ -363,3 +363,38 @@ impl ResolveError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identifier_error_tags_are_stable() {
+        let cases = [
+            (IdentifierError::Empty, "identifier.empty"),
+            (IdentifierError::TooLong { actual: 1, maximum: 1 }, "identifier.too-long"),
+            (IdentifierError::NonAscii, "identifier.non-ascii"),
+            (IdentifierError::EmptySegment { segment: 0 }, "identifier.empty-segment"),
+            (
+                IdentifierError::SegmentTooLong { segment: 0, actual: 1, maximum: 1 },
+                "identifier.segment-too-long",
+            ),
+            (
+                IdentifierError::InvalidSegmentStart { segment: 0, byte_index: 0 },
+                "identifier.invalid-segment-start",
+            ),
+            (
+                IdentifierError::InvalidSegmentEnd { segment: 0, byte_index: 0 },
+                "identifier.invalid-segment-end",
+            ),
+            (
+                IdentifierError::InvalidCharacter { byte_index: 0, character: '@' },
+                "identifier.invalid-character",
+            ),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(error.tag(), expected, "unstable tag for {error:?}");
+        }
+    }
+}
