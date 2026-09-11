@@ -88,6 +88,60 @@ command enforces a deliberately broad p99 guardrail of 5 ms and a max-call
 guardrail of 100 ms: these catch gross regressions in the real consumer path
 without pretending to be an SLA.
 
+## Extended-lane steady-state benchmark — 2026-09-07
+
+The scheduled extended lane reruns the same Criterion benchmark on a platform
+runner and retains the raw output as a build artifact. The retained artifact
+`kernox-benchmark-9a9d3f9037756cbb0345578a9b21a9f55c5aa31b` (schedule run
+`34080224078`, commit `9a9d3f9`, benchmark job success at 2026-09-07T03:41:52Z)
+was downloaded with `gh run download 34080224078 --name
+kernox-benchmark-9a9d3f9037756cbb0345578a9b21a9f55c5aa31b`; the unpacked
+`benchmark.txt` has sha256
+`575dd60b7ed4b1dfbfe47dc698c44a59bfee2c654ffc3d14e63bbd20abf20e28`.
+
+Command and environment:
+
+```text
+cargo bench --locked -p kernox --bench kernel
+```
+
+Criterion defaults (100 samples per steady-state benchmark) under the pinned
+1.97.1 toolchain on the `sylphx-linux-standard` runner. Criterion printed
+exactly:
+
+```text
+steady-state-call/direct-arc-dyn-trait
+                        time:   [1.3314 ns 1.3369 ns 1.3440 ns]
+steady-state-call/kernox-extracted-arc-dyn-trait
+                        time:   [1.3265 ns 1.3287 ns 1.3314 ns]
+```
+
+The console `time:` line Criterion 0.8.2 prints is rendered from its
+`typical()` estimate, which is the slope estimate when one is available and the
+mean otherwise (`criterion-0.8.2/src/estimate.rs`); the values above are those
+console values. The steady-state budget gate reads `mean.point_estimate` from
+Criterion's machine-readable `estimates.json` instead. The retained artifact
+holds only console text, so the comparison below is stated on the console values
+and does not by itself assert the mean-based gate decision for this run.
+
+| Path | Console `time:` estimate | 95% confidence interval |
+| --- | ---: | ---: |
+| Direct `Arc<dyn Trait>` call | 1.3369 ns | 1.3314–1.3440 ns |
+| Kernox-extracted `Arc<dyn Trait>` call | 1.3287 ns | 1.3265–1.3314 ns |
+
+The point-estimate delta on the recorded console values is approximately −0.61%
+(Kernox-extracted below direct). The printed confidence intervals share only the
+endpoint 1.3314 ns and do not otherwise overlap. The declared 2% budget holds on
+this observation.
+
+Limits: this is one scheduled observation at Criterion's default sampling; the
+artifact does not record the runner's machine class. The 2026-08-16 development
+matrix above records a roughly 2% spread between steady-state runs on the desk
+machine (Linux 6.18.18 x86_64, AMD EPYC 9454), which is not the extended-lane
+runner. A single Criterion comparison is therefore not a stable contract, and
+this section records the budget comparison for that one run rather than a
+distribution-level guarantee.
+
 ## What this does not prove
 
 Kernox is not yet “optimized to the limit.” The evidence proves that the

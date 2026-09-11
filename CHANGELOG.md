@@ -19,12 +19,31 @@ evidence are mature.
 
 - Public listing, contributing path, delivery gates, and `GraphBuilder::new` rustdoc no longer sell Kernox as a default company kernel or a production product. Dest remains experimental-engine, not a default dependency.
 
-## [0.1.1] - 2026-09-06
+## [0.1.1]
 
-First dest `0.1.x` public package probe. Immutable tag `v0.1.0` is not this
-probe: it is an ancestor of an older `main`, OIDC trusted publishing was not
-configured, and the tag must not be moved. `0.0.1` remains crate-name existence
-until dest `0.1.x` registry readback.
+Not a published release, and no release date is recorded. The current dest
+`0.1.x` package-probe candidate exists as tag `v0.1.1` (lightweight tag pushed
+2026-09-10, commit `bb4a2e1`), but the tag-gated publisher has not completed
+crates.io readback: crates.io serves only `0.0.1` (not yanked) for all seven
+packages. An earlier package-probe candidate, annotated tag `v0.1.0`, was never
+published either: its release run failed at OIDC authentication.
+
+Evidence verified 2026-09-10: release run `34530199204` for `v0.1.1` failed at
+OIDC authentication (error: `No Trusted Publishing config found for repository
+SylphxAI/kernox`) and skipped the publish/readback step; the `v0.1.0` tag object
+`e9da6a185f2ab6fa82ee36bdc5b8c2dba0beb30f` is annotated (tagger
+`2026-09-04T08:35:04Z`, message "Public crates.io probe for workspace 0.1.0"),
+and its release run `33854145664` failed with the same OIDC error and skipped
+publish/readback; no GitHub Release exists for `v0.1.1`
+(`releases/tags/v0.1.1` returns 404); `git ls-remote --tags origin` shows
+`refs/tags/v0.1.1` = `bb4a2e13807b0d1951c253b0e30941f8008d674b` with no
+dereferenced `^{}` line (lightweight) and `refs/tags/v0.1.0` =
+`e9da6a185f2ab6fa82ee36bdc5b8c2dba0beb30f` with dereferenced commit
+`9cd90c538795ac82d8bcd5d11642e68712d0e658`; the crates.io versions API returns
+only `0.0.1` for `kernox`, `kernox-core`, `kernox-runtime`,
+`kernox-host-serverless`, `kernox-host-tokio`, `kernox-testkit`, and
+`cargo-kernox`. `0.0.1` remains crate-name existence until dest `0.1.x` registry
+readback.
 
 ### Changed
 
@@ -71,4 +90,4 @@ until dest `0.1.x` registry readback.
   Tokio host crate, and the CLI host crate remains absent.
 
 [Unreleased]: https://github.com/SylphxAI/kernox/compare/v0.1.1...HEAD
-[0.1.1]: https://github.com/SylphxAI/kernox/releases/tag/v0.1.1
+[0.1.1]: https://github.com/SylphxAI/kernox/compare/v0.1.0...v0.1.1
