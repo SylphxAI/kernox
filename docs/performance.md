@@ -97,6 +97,21 @@ per-run spreads were much larger (0.0199 to 0.2596 on the desk host; 0.0437 on
 the dispatched run below), because one loaded run can move a single delta by
 tens of percent; the median absorbs those outliers.
 
+Two dispatched extended-lane runs of this revision on the self-hosted
+`sylphx-linux-standard` runner (2026-09-11) recorded the same protocol and
+passed: run
+[34550289322](https://github.com/SylphxAI/kernox/actions/runs/34550289322)
+produced per-run deltas -0.1720, -1.0916, +1.0272, +0.9643, and -0.3780 %
+(paired median **-0.1720 %**, per-run spread 0.021188, informational min-side
+-0.1422 %), and run
+[34551164171](https://github.com/SylphxAI/kernox/actions/runs/34551164171)
+produced -0.6297, -2.7033, -2.3940, -0.3343, and +1.7981 % (paired median
+**-0.6297 %**, spread 0.045014, min-side -0.6276 %). Both are consistent with
+the desk-host clean range, but two runner samples cannot measure the runner
+class's repeatability; the desk-host calibration above is the measured
+repeatability claim, and the runner evidence is reported as two passing
+recordings only.
+
 ### What the gate does and does not detect
 
 The measured repeatability span (1.60 pp on the desk host, 2.63 pp across the 13
