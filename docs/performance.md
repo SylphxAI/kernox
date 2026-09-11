@@ -93,9 +93,15 @@ reviewer's five retained clean recordings of the same unchanged source (per-run
 deltas in `/tmp/rev46/real-cycles-*`, paired medians +0.5392 %, -0.0452 %,
 -1.3080 %, +1.3208 %, +0.5891 %) extend the observed clean range to
 [-1.3080 %, +1.3208 %], a span of 2.6288 pp over 13 clean recordings. The
-per-run spreads were much larger (0.0199 to 0.2596 on the desk host; 0.0437 on
+per-run spreads were much larger (0.0199 to 0.2596 on the desk host; 0.043620 on
 the dispatched run below), because one loaded run can move a single delta by
 tens of percent; the median absorbs those outliers.
+
+These spans are observed samples from specific windows, not bounds on the
+variability: a later six-cycle window on the same desk host under heavier load
+spanned -2.2088 % to +3.0563 % and included one unchanged-source recording whose
+median failed the gate (`+3.0563 %`), which is why a failing gate requires a
+clean re-recording rather than a product regression claim.
 
 Two dispatched extended-lane runs of this revision on the self-hosted
 `sylphx-linux-standard` runner (2026-09-11) recorded the same protocol and
@@ -125,8 +131,9 @@ clean recording whose median was -1.3080 % (the reviewer's cycle F), a uniform
 +2.5 % regression would have produced about +1.16 % and passed, and a uniform
 +3.0 % regression about +1.65 % and also passed. The gate does detect systematic
 regressions whose shifted median stays above 2% with margin: the reviewer's two
-counterfactuals derived from the near-zero-median dispatched recording (uniform
-+2.5 % and all-runs +3.0 %) fail at +2.0769 % and +3.0000 %. It also fails
+regression counterfactuals fail: a uniform +2.5 % Kernox slowdown derived from
+the near-zero-median dispatched recording fails at +2.0769 %, and a constructed
+all-runs +3.0 % systematic tree fails at +3.0000 %. It also fails
 closed on missing, malformed, stale, mixed, or reordered evidence. Treat a
 failing gate as a red flag that needs a clean re-recording and investigation;
 treat a passing gate as evidence that no regression larger than the measured
