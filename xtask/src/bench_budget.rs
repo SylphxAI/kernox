@@ -317,7 +317,7 @@ pub(crate) struct RecordOptions {
 
 /// Parses `bench-budget [--criterion-dir DIR] [--runs N] --not-before EPOCH`.
 /// `--not-before` is required: without the invocation start there is no way to
-/// prove the recordings are fresh, so the gate refuses to run.
+/// guard against stale recordings, so the gate refuses to run.
 pub(crate) fn parse_gate_arguments(arguments: &[String]) -> Result<GateOptions, String> {
     let mut criterion_dir = CriterionDir::Default;
     let mut runs = DEFAULT_RUNS;
