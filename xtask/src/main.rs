@@ -1,5 +1,7 @@
 //! Repository verification orchestration.
 
+mod bench_budget;
+
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     fs,
@@ -28,9 +30,19 @@ fn main() -> ExitCode {
             let arguments = arguments.collect::<Vec<_>>();
             release_check(&arguments)
         }
+        Some("bench-budget") => {
+            let arguments = arguments.collect::<Vec<_>>();
+            bench_budget::parse_gate_arguments(&arguments)
+                .and_then(|options| bench_budget::run(&options))
+        }
+        Some("bench-budget-record") => {
+            let arguments = arguments.collect::<Vec<_>>();
+            bench_budget::parse_record_arguments(&arguments)
+                .and_then(|options| bench_budget::run_record(&options))
+        }
         _ => {
             eprintln!(
-                "usage: cargo run -p xtask -- verify\n       cargo run -p xtask -- release-check [--version VERSION]"
+                "usage: cargo run -p xtask -- verify\n       cargo run -p xtask -- release-check [--version VERSION]\n       cargo run -p xtask -- bench-budget [--criterion-dir DIR] [--runs COUNT] --not-before EPOCH_SECONDS\n       cargo run -p xtask -- bench-budget-record [--criterion-dir DIR] [--runs COUNT]"
             );
             return ExitCode::from(2);
         }
