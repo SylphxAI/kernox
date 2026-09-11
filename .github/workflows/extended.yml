@@ -80,3 +80,21 @@ jobs:
           path: benchmark.txt
           if-no-files-found: error
           retention-days: 30
+      # Record five repeated steady-state invocations, clearing the previous
+      # steady-state results first, and anchor the invocation start so the gate
+      # can reject accidentally stale, mixed, or reordered recordings (trusting
+      # this timestamp and untampered mtimes). Runs after the evidence upload so
+      # a failing gate still retains benchmark.txt.
+      - name: Record steady-state benchmark runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "BENCH_BUDGET_NOT_BEFORE=$(date -u +%s)" >> "$GITHUB_ENV"
+          cargo run --locked -p xtask -- bench-budget-record --runs 5
+      # Fail-closed enforcement of the declared 2% budget on the median of the
+      # five per-recording paired point-estimate deltas.
+      - name: Enforce steady-state budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run --locked -p xtask -- bench-budget --not-before "$BENCH_BUDGET_NOT_BEFORE"
