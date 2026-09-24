@@ -17,7 +17,7 @@ jobs:
   crates-io:
     name: publish dest 0.1.x
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    runs-on: sylphx-linux-standard
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: crates-io
     steps:
@@ -226,7 +226,7 @@ jobs:
     # for this repository does not carry it, so the call fails closed with
     # HTTP 403 (run 33866883483) and no config is created.
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    runs-on: sylphx-linux-standard
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Check out default branch
@@ -356,7 +356,7 @@ jobs:
       always() && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
       || (startsWith(github.ref, 'refs/tags/v0.1.') && needs.crates-io.result == 'success'))
     needs: [crates-io]
-    runs-on: sylphx-linux-standard
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - name: Check out release source
