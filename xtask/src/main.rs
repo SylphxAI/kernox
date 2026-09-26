@@ -18,10 +18,10 @@ const RELEASE_ORDER: &[&str] = &[
     "kernox",
     "cargo-kernox",
 ];
-/// GitHub-hosted runners only: this is a public repository, and a self-hosted
-/// runner a public repository can reach runs fork pull requests' code
-/// (platform decision 2026-09-24).
-const APPROVED_RUNNERS: [&str; 2] = ["ubuntu-latest", "macos-latest"];
+/// Sylphx-owned runners only (owner `standards/dx.md`): GitHub-hosted labels
+/// are not allowed. Platforms Sylphx does not host are cross-compiled from
+/// Linux, never run on a paid hosted runner.
+const APPROVED_RUNNERS: [&str; 2] = ["sylphx-linux-standard", "sylphx-linux-xlarge"];
 /// Secret-scan oracle pin (audit F2). The version and the Linux x64 archive
 /// checksum come from the gitleaks `v8.30.1` release `gitleaks_8.30.1_checksums.txt`
 /// and are repeated by the `ci.yml` verify job.
@@ -364,7 +364,7 @@ fn enforce_workflow_runner_boundary() -> Result<(), String> {
         for (job, profile) in profiles {
             if !APPROVED_RUNNERS.contains(&profile.as_str()) {
                 return Err(format!(
-                    "{} job {job} declares unsupported runs-on {profile:?}; use one static approved GitHub-hosted runner",
+                    "{} job {job} declares unsupported runs-on {profile:?}; use one static approved Sylphx runner profile",
                     path.display()
                 ));
             }
@@ -796,31 +796,40 @@ mod tests {
     fn workflow_runner_profiles_are_the_job_runs_on_values() {
         let source = r"
 name: commit
-# sylphx-linux-standard in a comment is not a runner assignment
+# ubuntu-latest in a comment is not a runner assignment
 jobs:
   verify:
-    runs-on: ubuntu-latest
-  macos:
-    runs-on: macos-latest
+    runs-on: sylphx-linux-standard
+  mutation:
+    runs-on: sylphx-linux-xlarge
 ";
         let profiles = runner_profiles_from_workflow(source).expect("valid workflow");
         assert_eq!(
             profiles,
             [
-                ("macos".to_owned(), "macos-latest".to_owned()),
-                ("verify".to_owned(), "ubuntu-latest".to_owned()),
+                ("mutation".to_owned(), "sylphx-linux-xlarge".to_owned()),
+                ("verify".to_owned(), "sylphx-linux-standard".to_owned()),
             ]
         );
         assert!(profiles.iter().all(|(_, profile)| APPROVED_RUNNERS.contains(&profile.as_str())));
     }
 
     #[test]
-    fn self_hosted_and_dynamic_runner_profiles_are_not_approved() {
-        let owned =
-            runner_profiles_from_workflow("jobs:\n  verify:\n    runs-on: sylphx-linux-standard\n")
-                .expect("an owned label still parses as a profile");
-        assert_eq!(owned, [("verify".to_owned(), "sylphx-linux-standard".to_owned())]);
-        assert!(!APPROVED_RUNNERS.contains(&owned[0].1.as_str()));
+    fn hosted_generic_and_dynamic_runner_profiles_are_not_approved() {
+        for hosted in ["ubuntu-latest", "macos-latest", "windows-latest", "ubuntu-24.04"] {
+            let profiles = runner_profiles_from_workflow(&format!(
+                "jobs:\n  verify:\n    runs-on: {hosted}\n"
+            ))
+            .expect("a hosted label still parses as a profile");
+            assert!(!APPROVED_RUNNERS.contains(&profiles[0].1.as_str()), "{hosted}");
+        }
+
+        let generic = format_runs_on(&serde_yaml::Value::Sequence(vec![
+            serde_yaml::Value::from("self-hosted"),
+            serde_yaml::Value::from("linux"),
+        ]))
+        .expect("a label sequence formats");
+        assert!(!APPROVED_RUNNERS.contains(&generic.as_str()));
 
         let dynamic = format_runs_on(&serde_yaml::Value::from("${{ matrix.os }}"))
             .expect("expressions remain exact labels");

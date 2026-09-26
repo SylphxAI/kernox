@@ -37,7 +37,8 @@ shutdown:    quiesce -> stop -> dispose in reverse dependency order
   naming of leaked tasks, and a forced abort after the declared time budget;
 - provider-neutral warm serverless apps with a fresh scope per invocation;
 - `cargo kernox` to validate and draw a graph, and a deterministic testkit; and
-- fuzzing, benchmarks, minimum-Rust-version checks and cross-platform CI.
+- fuzzing, benchmarks, minimum-Rust-version checks and cross-platform CI
+  (Linux tests, plus a cross-target compile for macOS and Windows).
 
 Kernox deliberately does not provide HTTP, storage, identity, AI, billing, an
 ORM, a generic event bus, or business policy. Those are plugins or external

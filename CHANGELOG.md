@@ -17,6 +17,7 @@ evidence are mature.
 
 ### Changed
 
+- CI runs only on Sylphx-owned runners (`sylphx-linux-standard`, `sylphx-linux-xlarge` for mutation testing); `xtask verify` rejects GitHub-hosted labels. The hosted `macOS portability` job is replaced by `cross-target portability`, a Linux compile of every published library and binary for macOS and Windows targets.
 - Public listing, contributing path, delivery gates, and `GraphBuilder::new` rustdoc no longer sell Kernox as a default company kernel or a production product. Dest remains experimental-engine, not a default dependency.
 
 ## [0.1.1]

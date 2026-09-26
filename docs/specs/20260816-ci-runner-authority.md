@@ -2,41 +2,40 @@
 
 ## Decision
 
-Every repository-owned workflow job must run on an approved Sylphx Platform
-self-hosted profile. The contract read from Platform `origin/main` at
-`82216476383f0569f34de3d8acd557894fc7c8ba` permits the following profiles for
-Kernox:
+Every repository-owned workflow job runs on a Sylphx-owned runner (owner
+`standards/dx.md`, SylphxAI/owner #746). The GitHub Actions budget is $0.
+Kernox uses:
 
-- normal commit, extended, and release work: `sylphx-linux-standard`;
-- a real macOS portability lane: `[self-hosted, sylphx, macos, standard]`.
+- commit, extended, and release work: `sylphx-linux-standard`;
+- mutation testing, which rebuilds the workspace per mutant:
+  `sylphx-linux-xlarge`.
 
-GitHub-hosted labels (`ubuntu-latest`, `macos-latest`, and `windows-latest`),
-generic self-hosted selectors, invented labels, and expression-driven
-`runs-on` values are not delivery evidence and are forbidden. Each job chooses
-one static profile.
+GitHub-hosted labels (`ubuntu-*`, `macos-*`, `windows-*`), generic
+self-hosted selectors, invented labels, and expression-driven `runs-on` values
+are forbidden. Each job chooses one static profile. This supersedes the
+2026-09-24 reading that public repositories must use GitHub-hosted runners.
 
 ## Cross-platform requirement
 
-The public workspace portability requirement remains active. Kernox retains a
-macOS lane because the Platform contract has an approved macOS profile. The
-Windows lane is currently an explicit acceptance residual: Platform has not
-published an approved static Windows profile, so this repository does not use a
-hosted runner, invent a label, or claim Windows evidence. The requirement can
-close only after Platform publishes that profile and the lane runs on it.
+The public workspace portability requirement remains active. Kernox has no
+platform-specific code and ships crates, not prebuilt binaries, so there is
+nothing to cross-compile for release. The former hosted `macOS portability`
+job is replaced by `cross-target portability`: a Linux `cargo check` of every
+published library and binary for `aarch64-apple-darwin`,
+`x86_64-apple-darwin`, and `x86_64-pc-windows-msvc`.
 
-Removing the former hosted Windows job is therefore a policy hard cut, not a
-portability waiver. Linux and macOS results must never be reported as Windows
-coverage.
+That lane is compile evidence only. Linux results and cross-target compiles
+must never be reported as macOS or Windows test coverage; on-platform test
+evidence remains an explicit acceptance residual.
 
 ## Evidence states
 
-Landed source `7ef8db3b475eea6716516cfcbdadd617e265896f` is preserved. Earlier
-green checks from PR `#10` (`31934513495`, `31934603072`) ran on GitHub-hosted
-machines and remain source/test evidence only; they do not prove compliance
-with this runner authority. A compliant CI claim requires the new workflows to
-execute on the static Sylphx labels above.
+Earlier green checks that ran on GitHub-hosted machines remain source/test
+evidence only; they do not prove compliance with this runner authority. A
+compliant CI claim requires the workflows to execute on the Sylphx labels
+above.
 
 The `xtask verify` entrypoint parses each workflow job's `runs-on` value before
-the product verification path, so a future hosted or dynamic selector fails the
+the product verification path, so a hosted or dynamic selector fails the
 repository commit build locally and in CI. A comment that mentions a hosted
 label is not a runner assignment.
