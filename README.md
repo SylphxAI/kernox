@@ -1,25 +1,15 @@
 # Kernox
 
-Kernox is an experimental embeddable Rust engine that composes a host and trusted in-process plugins into one deterministic capability graph.
+Kernox is an experimental Rust library for assembling an application from
+plugins. Each plugin declares what it provides and what it needs; Kernox checks
+the whole graph at startup, wires the plugins together, and starts, rolls back
+and shuts them down in dependency order.
 
-- Ordinary: `none` — experimental engine; there is no public customer website.
-- Preview: `none` — there is no admitted product-owned preview or dogfood web host.
-- Default: `no` — not a default company dependency. Production coupling of any other product needs an accepted decision.
-- Vision: [`docs/vision.md`](docs/vision.md)
-- Capabilities: [`docs/capabilities.md`](docs/capabilities.md)
-- PRD: [`docs/prd.md`](docs/prd.md)
-
-**Compose products. Keep domains pure.**
-
-A product is a statically selected set of plugins. Each plugin declares versioned
-capabilities it offers and requires; Kernox validates the graph, injects typed
-handles, and owns deterministic startup, rollback, and shutdown.
-
-The graph is the control plane, not the request path. After boot, domain code
-calls an ordinary `Arc<dyn Trait>` directly—no graph traversal, serialization,
-event bus, or service-locator lookup per call. The absolute point-estimate delta
-against direct composition is 0.14% on the recorded baseline, with overlapping
-confidence intervals.
+The graph is used only at startup and shutdown. After boot, your code calls an
+ordinary `Arc<dyn Trait>` directly, with no graph lookup, serialization or
+event bus per call. In the recorded benchmark the difference from wiring the
+same code by hand is 0.14%, within measurement noise
+([performance](docs/performance.md)).
 
 ```text
 product = Host + selected Plugins + explicit Bindings
@@ -37,13 +27,11 @@ shutdown:    quiesce -> stop -> dispose in reverse dependency order
 - typed atomic provisioning with declared-only access and no global resolver;
 - rollback that keeps the primary failure and every cleanup failure;
 - reverse-order idempotent shutdown and privacy-safe lifecycle observations;
-- supervised Tokio tasks with cancellation, panic fail-closed reporting,
-  bounded drain, leak naming, and forced abort after the declared budget;
+- supervised Tokio tasks with cancellation, panic reporting, a bounded drain,
+  naming of leaked tasks, and a forced abort after the declared time budget;
 - provider-neutral warm serverless apps with a fresh scope per invocation;
-- `cargo kernox` graph validation/rendering, a deterministic testkit, and a
-  North Star conformance oracle for verified three-plugin applications; and
-- dual licensing, locked verification, advisory/license/source policy, fuzzing,
-  benchmarks, MSRV checks, cross-platform CI, and trusted-publishing automation.
+- `cargo kernox` to validate and draw a graph, and a deterministic testkit; and
+- fuzzing, benchmarks, minimum-Rust-version checks and cross-platform CI.
 
 Kernox deliberately does not provide HTTP, storage, identity, AI, billing, an
 ORM, a generic event bus, or business policy. Those are plugins or external
@@ -71,7 +59,7 @@ The examples cover distinct composition shapes:
 - [worker-app](examples/worker-app) delegates a named background task to the
   supervised Tokio host and drains it on shutdown.
 
-## Try the source candidate
+## Try it
 
 ```bash
 cargo run -p kernox-example-order-app --bin long_lived
@@ -84,25 +72,21 @@ cargo run -p cargo-kernox -- kernox check fixtures/compositions/verified.json --
 cargo run -p cargo-kernox -- kernox graph fixtures/compositions/valid.json --format dot
 ```
 
-The repository commit build is:
+Kernox is not on crates.io yet (the `0.0.1` crate there only reserves the
+name), so use it from Git. To run every check CI runs:
 
 ```bash
 cargo run --locked -p xtask -- verify
 ```
 
-It runs formatting, all-target checks, Clippy, tests, rustdoc, the runtime-free
-core boundary, both product paths, dependency policy, RustSec audit, a pinned
-full-history gitleaks secret scan, and the independently packageable core
-artifact. The secret scan pins gitleaks v8.30.1 (linux x86_64), uses a
-checksum-matching scanner from `PATH` or `target/kernox-tools`, and downloads
-and checksum-verifies the pinned release on first use. Fuzz, mutation, and
-benchmark distributions have separate extended lanes.
+It runs formatting, Clippy, tests, rustdoc, the dependency and license policy,
+a RustSec audit and a secret scan. Fuzzing, mutation testing and benchmarks run
+separately.
 
-## Design and operating contract
+## Documentation
 
 - [Product vision](docs/vision.md)
 - [Capability architecture](docs/capabilities.md)
-- [Product identity and North Star](PROJECT.md)
 - [Product requirements](docs/prd.md)
 - [Critical path and redesign triggers](docs/critical-path.md)
 - [Runtime semantics](docs/specs/20260815T185400Z-runtime-contract.md)
@@ -114,19 +98,10 @@ benchmark distributions have separate extended lanes.
 - [Threat model](docs/security/threat-model.md)
 - [Security reporting](SECURITY.md)
 
-## Release state
+## Status
 
-Kernox is currently a pre-1.0 development engine. The workspace uses the
-`0.1.x` package train. The first public package probe is dest `0.1.x`
-(KR-PUBLISH): a tagged workspace version that is an ancestor of `main`,
-published by the tag-gated trusted-publishing writer and read back from
-crates.io. `kernox@0.0.1` is crate-name existence bootstrap, not dest.
-Stable 1.x remains refused until the engine is admitted mature.
-
-Source correctness, pull-request CI, merge state, crates.io packages, and real
-product adoption are separate facts. Consult GitHub Actions/Releases and the
-crates.io package pages for those current states; this README does not turn a
-local or merged candidate into a published release.
+Kernox is pre-1.0 and experimental: the API can change in any `0.x` release.
+Releases are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
