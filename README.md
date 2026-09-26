@@ -1,5 +1,11 @@
 # Kernox
 
+<p align="center">
+  <img src="https://mark.sylphx.com/api/v1/mark/hero.svg?type=aurora&theme=grape&text=Kernox&desc=Assemble%20Rust%20apps%20from%20checked%20plugins" alt="Kernox" width="100%" />
+</p>
+
+<!-- repomap:agent-ready -->[![agent-ready 96/100](https://mark.sylphx.com/badge/agent--ready-96%2F100-brightgreen)](https://github.com/SylphxAI/repomap#agent-readiness-score)<!-- /repomap:agent-ready -->
+
 Kernox is an experimental Rust library for assembling an application from
 plugins. Each plugin declares what it provides and what it needs; Kernox checks
 the whole graph at startup, wires the plugins together, and starts, rolls back
