@@ -6,6 +6,8 @@
 
 <!-- repomap:agent-ready -->[![agent-ready 96/100](https://mark.sylphx.com/badge/agent--ready-96%2F100-brightgreen)](https://github.com/SylphxAI/repomap#agent-readiness-score)<!-- /repomap:agent-ready -->
 
+> **Archived on 2026-09-27.** Kernox is no longer developed. No product used it, and the ideas worth keeping are a capability graph checked at startup and ordered lifecycle and rollback. Those move into the products that need them, not a separate kernel. The repository stays readable. The `kernox` 0.0.1 placeholder on crates.io is not maintained.
+
 Kernox is an experimental Rust library for assembling an application from
 plugins. Each plugin declares what it provides and what it needs; Kernox checks
 the whole graph at startup, wires the plugins together, and starts, rolls back
